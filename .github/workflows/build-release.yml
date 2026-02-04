@@ -6,6 +6,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # 🟢 修复点 1: 在 Job 级别定义环境变量，映射 Secret
+    env:
+      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+
     steps:
       - uses: actions/checkout@v4
       
@@ -32,7 +36,8 @@ jobs:
           npx cap sync android
 
       - name: Decode Keystore
-        if: secrets.KEYSTORE_BASE64 != ''
+        # 🟢 修复点 2: 使用 env 上下文代替 secrets 上下文
+        if: env.KEYSTORE_BASE64 != ''
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/release.keystore
           echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}" > android/keystore.properties
