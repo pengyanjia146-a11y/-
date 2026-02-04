@@ -3,7 +3,7 @@ import { musicService } from './services/geminiService';
 import { Player } from './components/Player';
 import { LoginModal } from './components/LoginModal';
 import { Toast, ToastType } from './components/Toast';
-import { HomeIcon, SearchIcon, LibraryIcon, NeteaseIcon, YouTubeIcon, PlayIcon, LabIcon, PlaylistAddIcon, PluginFileIcon, MoreVerticalIcon, HeartIcon, DownloadIcon, NextPlanIcon, SettingsIcon, FolderIcon, ActivityIcon, TrashIcon, UserCheckIcon, UserPlusIcon } from './components/Icons';
+import { HomeIcon, SearchIcon, LibraryIcon, NeteaseIcon, YouTubeIcon, BilibiliIcon, PlayIcon, LabIcon, PlaylistAddIcon, PluginFileIcon, MoreVerticalIcon, HeartIcon, DownloadIcon, NextPlanIcon, SettingsIcon, FolderIcon, ActivityIcon, TrashIcon, UserCheckIcon, UserPlusIcon } from './components/Icons';
 import { Song, UserProfile, ViewState, MusicSource, Playlist, MusicPlugin, AudioQuality, Artist } from './types';
 
 export default function App() {
@@ -18,7 +18,7 @@ export default function App() {
   const [quality, setQuality] = useState<AudioQuality>('standard');
 
   // Search Tabs
-  const [activeTab, setActiveTab] = useState<'ALL' | 'NETEASE' | 'PLUGIN' | 'YOUTUBE'>('ALL');
+  const [activeTab, setActiveTab] = useState<'ALL' | 'NETEASE' | 'BILIBILI' | 'YOUTUBE' | 'PLUGIN'>('ALL');
 
   // Toast State
   const [toast, setToast] = useState<{msg: string, type: ToastType, show: boolean}>({ msg: '', type: 'info', show: false });
@@ -30,6 +30,8 @@ export default function App() {
           { id: 'fav', name: '我喜欢的音乐', description: '红心收藏', songs: [], isSystem: true, coverUrl: 'https://picsum.photos/300?99' }
       ];
   });
+  // Separate state for NetEase Playlists fetched from API
+  const [neteasePlaylists, setNeteasePlaylists] = useState<Playlist[]>([]);
   const [activePlaylist, setActivePlaylist] = useState<Playlist | null>(null);
 
   // Followed Artists State
@@ -110,11 +112,22 @@ export default function App() {
     const savedUser = localStorage.getItem('unistream_user');
     if (savedUser) {
       try {
-        setUser(JSON.parse(savedUser));
+        const u = JSON.parse(savedUser);
+        setUser(u);
+        fetchUserResources(u);
       } catch (e) {}
     }
     checkLatency();
   }, []);
+
+  const fetchUserResources = async (u: UserProfile) => {
+      if (u.platform === 'netease' && u.id) {
+          try {
+              const pls = await musicService.getUserPlaylists(u.id);
+              setNeteasePlaylists(pls);
+          } catch(e) { console.error(e); }
+      }
+  };
 
   useEffect(() => {
     const handleClick = () => setOpenMenuId(null);
@@ -129,16 +142,18 @@ export default function App() {
       setPinging(false);
   };
 
-  const handleLoginSuccess = (loggedInUser: UserProfile) => {
+  const handleLoginSuccess = async (loggedInUser: UserProfile) => {
     setUser(loggedInUser);
     localStorage.setItem('unistream_user', JSON.stringify(loggedInUser));
     setShowLogin(false);
     showToast(`欢迎回来, ${loggedInUser.nickname}`, 'success');
+    await fetchUserResources(loggedInUser);
   };
 
   const handleLogout = () => {
     setUser(null);
     localStorage.removeItem('unistream_user');
+    setNeteasePlaylists([]);
     showToast('已退出登录', 'info');
   };
 
@@ -267,6 +282,41 @@ export default function App() {
           setView('ARTIST_DETAIL');
       } catch (e) {
           showToast('获取歌手信息失败', 'error');
+      }
+  };
+  
+  // --- Netease Playlist Click Logic ---
+  const handleNeteasePlaylistClick = async (pl: Playlist) => {
+      showToast(`正在获取歌单详情: ${pl.name}`, 'loading');
+      try {
+          // If fetched from user list, it might allow fetching full tracks now
+          const songs = await musicService.importNeteasePlaylist(pl.id);
+          if (songs.length > 0) {
+              const fullPl = { ...pl, songs };
+              setActivePlaylist(fullPl);
+          } else {
+               showToast('歌单为空或获取失败', 'error');
+          }
+      } catch (e) {
+          showToast('歌单获取失败', 'error');
+      }
+  };
+  
+  const handleDailyRecommend = async () => {
+      if (!user) { setShowLogin(true); return; }
+      showToast('正在获取每日推荐...', 'loading');
+      const songs = await musicService.getDailyRecommendSongs();
+      if (songs.length > 0) {
+          const dailyPl: Playlist = {
+              id: 'daily-recommend',
+              name: '每日推荐',
+              description: '根据你的口味生成',
+              songs: songs,
+              coverUrl: songs[0].coverUrl
+          };
+          setActivePlaylist(dailyPl);
+      } else {
+          showToast('获取失败，请确保已登录', 'error');
       }
   };
 
@@ -485,14 +535,28 @@ export default function App() {
         <div className="relative z-10 w-full">
           <h1 className="text-3xl font-bold mb-2">UniStream</h1>
           <p className="text-gray-200 mb-4 max-w-md text-sm md:text-base">
-            聚合音乐播放器 V2.2<br/>
-            <span className="text-xs opacity-75">全屏歌词 / 歌手关注 / 视频播放</span>
+            聚合音乐播放器 V2.4<br/>
+            <span className="text-xs opacity-75">智能节点切换 / 底部菜单优化 / 歌单同步</span>
           </p>
           <div className="flex gap-2">
              <div className="text-xs bg-white/20 px-2 py-1 rounded">访客身份已生成</div>
           </div>
         </div>
       </div>
+
+      {/* Daily Recommend Quick Access if logged in */}
+      {user && (
+          <div onClick={handleDailyRecommend} className="bg-gradient-to-r from-netease to-red-800 p-4 rounded-xl flex items-center justify-between cursor-pointer hover:scale-[1.02] transition-transform">
+              <div className="flex items-center gap-4">
+                  <div className="bg-white/20 p-3 rounded-full"><NeteaseIcon className="text-white" /></div>
+                  <div>
+                      <h3 className="font-bold text-lg">每日推荐</h3>
+                      <p className="text-xs text-white/70">根据你的音乐口味生成</p>
+                  </div>
+              </div>
+              <PlayIcon fill="white" />
+          </div>
+      )}
 
       <div className="bg-dark-light p-4 rounded-xl border border-white/5">
           <div className="flex justify-between items-center mb-4">
@@ -569,7 +633,9 @@ export default function App() {
                     )}
                 </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {/* Local & Created Playlists */}
+                <h3 className="font-bold text-lg mb-3">我的歌单</h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-8">
                     {playlists.map(pl => (
                         <div key={pl.id} onClick={() => setActivePlaylist(pl)} className="group cursor-pointer">
                             <div className="relative aspect-square rounded-xl overflow-hidden mb-2 bg-gray-800 border border-white/5">
@@ -582,6 +648,25 @@ export default function App() {
                         </div>
                     ))}
                 </div>
+
+                {/* Netease Fetched Playlists */}
+                {neteasePlaylists.length > 0 && (
+                    <>
+                        <h3 className="font-bold text-lg mb-3 flex items-center gap-2"><NeteaseIcon size={20} /> 网易云歌单</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                            {neteasePlaylists.map(pl => (
+                                <div key={pl.id} onClick={() => handleNeteasePlaylistClick(pl)} className="group cursor-pointer">
+                                    <div className="relative aspect-square rounded-xl overflow-hidden mb-2 bg-gray-800 border border-white/5">
+                                        <img src={pl.coverUrl} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                                        <div className="absolute inset-0 bg-black/20 group-hover:bg-black/0 transition-colors" />
+                                    </div>
+                                    <h3 className="font-bold truncate">{pl.name}</h3>
+                                    <p className="text-xs text-gray-400">云端歌单</p>
+                                </div>
+                            ))}
+                        </div>
+                    </>
+                )}
               </>
           ) : (
               <div>
@@ -604,7 +689,9 @@ export default function App() {
                                   <div className="text-xs text-gray-400 truncate">{song.artist}</div>
                               </div>
                               <div className="absolute right-2 top-1/2 -translate-y-1/2">
-                                 <SongItemMenu song={song} isLiked={isLiked(song)} onToggleLike={() => handleToggleLike(song)} onDownload={() => handleDownload(song)} onPlayNext={() => handlePlayNext(song)} isOpen={openMenuId === song.id} setOpen={(v) => setOpenMenuId(v ? song.id : null)} onArtistClick={handleArtistClick} />
+                                 <button onClick={() => setOpenMenuId(song.id)} className="p-2 text-gray-400 hover:text-white rounded-full hover:bg-white/10">
+                                     <MoreVerticalIcon size={18} />
+                                 </button>
                               </div>
                           </div>
                       ))}
@@ -688,7 +775,9 @@ export default function App() {
                               <div className="text-xs text-gray-400 truncate">{song.album}</div>
                           </div>
                           <div className="absolute right-2 top-1/2 -translate-y-1/2">
-                             <SongItemMenu song={song} isLiked={isLiked(song)} onToggleLike={() => handleToggleLike(song)} onDownload={() => handleDownload(song)} onPlayNext={() => handlePlayNext(song)} isOpen={openMenuId === song.id} setOpen={(v) => setOpenMenuId(v ? song.id : null)} />
+                             <button onClick={() => setOpenMenuId(song.id)} className="p-2 text-gray-400 hover:text-white rounded-full hover:bg-white/10">
+                                 <MoreVerticalIcon size={18} />
+                             </button>
                           </div>
                       </div>
                    ))}
@@ -702,6 +791,7 @@ export default function App() {
       const filteredResults = searchResults.filter(s => {
           if (activeTab === 'ALL') return true;
           if (activeTab === 'NETEASE') return s.source === MusicSource.NETEASE;
+          if (activeTab === 'BILIBILI') return s.source === MusicSource.BILIBILI;
           if (activeTab === 'PLUGIN') return s.source === MusicSource.PLUGIN;
           if (activeTab === 'YOUTUBE') return s.source === MusicSource.YOUTUBE;
           return true;
@@ -722,6 +812,7 @@ export default function App() {
                     {[
                         { id: 'ALL', label: '全部' },
                         { id: 'NETEASE', label: '网易云' },
+                        { id: 'BILIBILI', label: 'Bilibili' },
                         { id: 'YOUTUBE', label: 'YouTube' },
                         { id: 'PLUGIN', label: '扩展插件' }
                     ].map(tab => (
@@ -870,6 +961,11 @@ export default function App() {
           </div>
       </div>
   );
+  
+  // Find song details for menu
+  const menuSong = openMenuId 
+      ? (activePlaylist?.songs.find(s => s.id === openMenuId) || searchResults.find(s => s.id === openMenuId) || playHistory.find(s => s.id === openMenuId) || activeArtist?.songs.find(s => s.id === openMenuId) || queue.find(s => s.id === openMenuId))
+      : null;
 
   return (
     <div className="min-h-screen bg-dark text-white flex flex-col md:flex-row">
@@ -901,6 +997,20 @@ export default function App() {
           {view === 'SETTINGS' && renderSettings()}
         </div>
       </div>
+      
+      {/* Global Song Menu Bottom Sheet */}
+      {menuSong && (
+          <SongItemMenu 
+              song={menuSong} 
+              isLiked={isLiked(menuSong)} 
+              onToggleLike={() => handleToggleLike(menuSong)}
+              onDownload={() => handleDownload(menuSong)}
+              onPlayNext={() => handlePlayNext(menuSong)}
+              isOpen={!!menuSong}
+              setOpen={() => setOpenMenuId(null)}
+              onArtistClick={handleArtistClick}
+          />
+      )}
 
       <div className="md:hidden fixed bottom-0 left-0 right-0 bg-dark-light/90 backdrop-blur-lg border-t border-white/5 flex justify-around items-center py-3 pb-safe z-50">
           <MobileNavBtn icon={<HomeIcon />} label="首页" active={view === 'HOME'} onClick={() => setView('HOME')} />
@@ -930,7 +1040,7 @@ export default function App() {
   );
 }
 
-// ... NavBtn, MobileNavBtn, SongItem, SongItemMenu components (same as before)
+// ... NavBtn, MobileNavBtn, SongItem components
 const NavBtn = ({ icon, label, active, onClick }: any) => (
   <button onClick={onClick} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${active ? 'bg-white/10 text-white font-medium' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}>
     {React.cloneElement(icon, { size: 20 })}
@@ -958,7 +1068,7 @@ interface SongItemProps {
   onArtistClick: (id: string) => void;
 }
 
-const SongItem: React.FC<SongItemProps> = ({ song, onClick, isCurrent, onToggleLike, onDownload, onPlayNext, isLiked, isOpenMenu, setOpenMenu, onArtistClick }) => (
+const SongItem: React.FC<SongItemProps> = ({ song, onClick, isCurrent, setOpenMenu, onArtistClick }) => (
   <div onClick={onClick} className={`group flex items-center p-3 rounded-xl cursor-pointer transition-colors ${isCurrent ? 'bg-white/10' : 'hover:bg-white/5'}`}>
     <div className="relative w-12 h-12 rounded-lg overflow-hidden mr-4 flex-shrink-0">
       <img src={song.coverUrl} alt={song.title} className={`w-full h-full object-cover ${song.isGray ? 'grayscale opacity-50' : ''}`} />
@@ -973,6 +1083,7 @@ const SongItem: React.FC<SongItemProps> = ({ song, onClick, isCurrent, onToggleL
       </h3>
       <p className="text-xs text-gray-400 truncate flex items-center gap-1">
         {song.source === MusicSource.NETEASE && <span className="text-[9px] px-1 rounded bg-gray-800 text-netease/80">网易云</span>}
+        {song.source === MusicSource.BILIBILI && <span className="text-[9px] px-1 rounded bg-pink-500/20 text-pink-400">Bilibili</span>}
         {song.source === MusicSource.YOUTUBE && <span className="text-[9px] px-1 rounded bg-gray-800 text-youtube/80">YouTube</span>}
         {song.source === MusicSource.PLUGIN && <span className="text-[9px] px-1 rounded bg-gray-800 text-primary/80">Plugin</span>}
         {song.source === MusicSource.LOCAL && <span className="text-[9px] px-1 rounded bg-gray-600 text-white/80">本地</span>}
@@ -986,34 +1097,52 @@ const SongItem: React.FC<SongItemProps> = ({ song, onClick, isCurrent, onToggleL
       </p>
     </div>
     <div className="flex items-center gap-2 ml-2" onClick={e => e.stopPropagation()}>
-         <div className="relative">
-             <button onClick={() => setOpenMenu(isOpenMenu ? null : song.id)} className="p-2 text-gray-400 hover:text-white rounded-full hover:bg-white/10">
-                 <MoreVerticalIcon size={18} />
-             </button>
-             <SongItemMenu song={song} isLiked={isLiked} onToggleLike={onToggleLike} onDownload={onDownload} onPlayNext={onPlayNext} isOpen={isOpenMenu} setOpen={(v) => setOpenMenu(v ? song.id : null)} onArtistClick={onArtistClick} />
-         </div>
+         <button onClick={() => setOpenMenu(song.id)} className="p-2 text-gray-400 hover:text-white rounded-full hover:bg-white/10">
+             <MoreVerticalIcon size={18} />
+         </button>
     </div>
   </div>
 );
 
+// Updated: Bottom Sheet Style Menu
 const SongItemMenu = ({ song, isLiked, onToggleLike, onDownload, onPlayNext, isOpen, setOpen, onArtistClick }: any) => {
     if (!isOpen) return null;
     return (
-        <div className="absolute right-0 top-10 w-40 bg-dark-light border border-white/10 rounded-xl shadow-2xl z-50 overflow-hidden animate-fade-in">
-            <button onClick={() => { onPlayNext(); setOpen(false); }} className="w-full text-left px-4 py-3 text-xs hover:bg-white/10 flex items-center gap-2 text-white">
-                <NextPlanIcon size={14} /> 下一首播放
-            </button>
-            <button onClick={() => { onToggleLike(); setOpen(false); }} className="w-full text-left px-4 py-3 text-xs hover:bg-white/10 flex items-center gap-2 text-white">
-                <HeartIcon size={14} fill={isLiked ? "currentColor" : "none"} className={isLiked ? "text-netease" : ""} /> {isLiked ? "取消收藏" : "收藏"}
-            </button>
-            <button onClick={() => { onDownload(); setOpen(false); }} className="w-full text-left px-4 py-3 text-xs hover:bg-white/10 flex items-center gap-2 text-white">
-                <DownloadIcon size={14} /> 下载 (跳转)
-            </button>
-            {song.artistId && (
-                <button onClick={() => { onArtistClick(song.artistId); setOpen(false); }} className="w-full text-left px-4 py-3 text-xs hover:bg-white/10 flex items-center gap-2 text-white">
-                    <UserCheckIcon size={14} /> 查看歌手
+        <div className="fixed inset-0 z-[100] flex justify-center items-end md:items-center animate-fade-in">
+            {/* Backdrop */}
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setOpen(false)}></div>
+            
+            {/* Menu Content - Bottom Sheet on Mobile, Centered Modal on Desktop */}
+            <div className="bg-dark-light w-full md:w-80 rounded-t-2xl md:rounded-2xl border border-white/10 shadow-2xl z-10 p-4 pb-safe animate-slide-up transform transition-transform">
+                <div className="flex items-center gap-3 mb-4 pb-4 border-b border-white/5">
+                    <img src={song.coverUrl} className="w-12 h-12 rounded-lg bg-gray-800 object-cover" />
+                    <div className="flex-1 min-w-0">
+                        <h4 className="font-bold truncate text-sm">{song.title}</h4>
+                        <p className="text-xs text-gray-400 truncate">{song.artist}</p>
+                    </div>
+                </div>
+
+                <div className="space-y-1">
+                    <button onClick={() => { onPlayNext(); setOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg flex items-center gap-3 text-white transition-colors">
+                        <NextPlanIcon size={18} /> 下一首播放
+                    </button>
+                    <button onClick={() => { onToggleLike(); setOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg flex items-center gap-3 text-white transition-colors">
+                        <HeartIcon size={18} fill={isLiked ? "currentColor" : "none"} className={isLiked ? "text-netease" : ""} /> {isLiked ? "取消收藏" : "收藏"}
+                    </button>
+                    <button onClick={() => { onDownload(); setOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg flex items-center gap-3 text-white transition-colors">
+                        <DownloadIcon size={18} /> 下载 (跳转浏览器)
+                    </button>
+                    {song.artistId && (
+                        <button onClick={() => { onArtistClick(song.artistId); setOpen(false); }} className="w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg flex items-center gap-3 text-white transition-colors">
+                            <UserCheckIcon size={18} /> 查看歌手
+                        </button>
+                    )}
+                </div>
+                
+                <button onClick={() => setOpen(false)} className="w-full mt-4 py-3 text-center text-gray-500 hover:text-white border-t border-white/5 md:hidden">
+                    关闭
                 </button>
-            )}
+            </div>
         </div>
     );
 };

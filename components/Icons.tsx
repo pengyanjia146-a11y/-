@@ -18,6 +18,12 @@ export const YouTubeIcon = ({ size = 24, className, fill = "currentColor" }: Ico
   </svg>
 );
 
+export const BilibiliIcon = ({ size = 24, className, fill = "currentColor" }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 24 24" fill={fill}>
+    <path d="M18.7 5.3h-2.6l1-2.6c.1-.3-.2-.6-.5-.5-.1 0-.2.1-.2.2l-1.3 3.3h-6L7.9 2.4c0-.3-.4-.4-.5-.2-.1.1-.1.2-.1.2l1 2.9H5.3C2.4 5.3 0 7.7 0 10.6v8c0 2.9 2.4 5.3 5.3 5.3h13.3c2.9 0 5.3-2.4 5.3-5.3v-8c.1-2.9-2.3-5.3-5.2-5.3zm-10 11.4c-1.1 0-1.9-.9-1.9-1.9s.9-1.9 1.9-1.9 1.9.9 1.9 1.9-.9 1.9-1.9 1.9zm10.7 0c-1.1 0-1.9-.9-1.9-1.9s.9-1.9 1.9-1.9 1.9.9 1.9 1.9-.9 1.9-1.9 1.9z"/>
+  </svg>
+);
+
 export const PlayIcon = ({ size = 24, className, fill = "none" }: IconProps) => (
   <svg width={size} height={size} className={className} viewBox="0 0 24 24" fill={fill} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
 );

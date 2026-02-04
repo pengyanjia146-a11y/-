@@ -1,5 +1,5 @@
 import { CapacitorHttp } from '@capacitor/core';
-import { Song, MusicSource, AudioQuality, Artist } from "../types";
+import { Song, MusicSource, AudioQuality, Artist, Playlist } from "../types";
 
 // Define a richer return type for playback details
 interface SongPlayDetails {
@@ -20,13 +20,20 @@ export class ClientSideService {
     'X-Real-IP': '115.239.211.112', 
     'X-Forwarded-For': '115.239.211.112'
   };
+  
+  private bilibiliHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Referer': 'https://www.bilibili.com/'
+  };
 
   private invidiousInstances = [
       'https://inv.tux.pizza',
       'https://vid.uff.net',
       'https://inv.nadeko.net',
       'https://invidious.jing.rocks',
-      'https://yt.artemislena.eu'
+      'https://yt.artemislena.eu',
+      'https://invidious.nerdvpn.de',
+      'https://inv.zzls.xyz'
   ];
   private currentInvInstance = this.invidiousInstances[0];
   private customInvInstance = '';
@@ -117,7 +124,6 @@ export class ClientSideService {
            youtube = Date.now() - ytStart;
       } catch (e) { 
            youtube = -1; 
-           if (!this.customInvInstance) this.rotateInstance();
       }
       return { netease, youtube };
   }
@@ -158,6 +164,60 @@ export class ClientSideService {
   removePlugin(id: string) { this.plugins = this.plugins.filter(p => p.id !== id); }
 
   // --- Artist & Playlist Import Logic ---
+  
+  // Get User Playlists
+  async getUserPlaylists(uid: string): Promise<Playlist[]> {
+      try {
+          const url = `https://music.163.com/api/user/playlist?uid=${uid}&limit=100&offset=0`;
+          const response = await CapacitorHttp.get({
+              url: url,
+              headers: this.getHeaders(),
+              connectTimeout: this.requestTimeout
+          });
+
+          let data = response.data;
+          if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e) {} }
+
+          if (data && data.code === 200 && data.playlist) {
+              return data.playlist.map((pl: any) => ({
+                  id: String(pl.id),
+                  name: pl.name,
+                  description: pl.description,
+                  songs: [], // Songs are lazy loaded usually, or we can fetch first track
+                  coverUrl: pl.coverImgUrl ? pl.coverImgUrl.replace(/^http:/, 'https:') : '',
+                  isSystem: false,
+                  creatorId: String(pl.creator?.userId)
+              }));
+          }
+      } catch (e) {
+          console.error("User Playlist Error", e);
+      }
+      return [];
+  }
+
+  // Get Daily Recommend Songs
+  async getDailyRecommendSongs(): Promise<Song[]> {
+      try {
+          // This API usually requires a valid LOGIN cookie
+          const url = `https://music.163.com/api/v3/discovery/recommend/songs`;
+          const response = await CapacitorHttp.post({
+              url: url,
+              headers: this.getHeaders(),
+              connectTimeout: this.requestTimeout
+          });
+
+          let data = response.data;
+          if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e) {} }
+          
+          if (data && data.code === 200 && data.data && data.data.dailySongs) {
+               return data.data.dailySongs.map((item: any) => this.mapNeteaseSong(item));
+          }
+      } catch (e) {
+          console.error("Daily Recommend Error", e);
+      }
+      return [];
+  }
+
   async importNeteasePlaylist(playlistId: string): Promise<Song[]> {
       try {
           const url = `https://music.163.com/api/v3/playlist/detail?id=${playlistId}&n=1000&s=8`;
@@ -214,6 +274,7 @@ export class ClientSideService {
   async searchMusic(query: string): Promise<Song[]> {
     const promises = [
         this.searchNetease(query),
+        this.searchBilibili(query),
         this.searchYouTube(query),
         ...this.plugins.map(p => this.searchPlugin(p, query))
     ];
@@ -282,44 +343,99 @@ export class ClientSideService {
       return [];
   }
 
-  private async searchYouTube(keyword: string): Promise<Song[]> {
-      const targetHost = this.customInvInstance || this.currentInvInstance;
+  private async searchBilibili(keyword: string): Promise<Song[]> {
       try {
-          const url = `${targetHost}/api/v1/search?q=${encodeURIComponent(keyword)}&type=video`;
-          // Use configured timeout
-          const response = await CapacitorHttp.get({ url, connectTimeout: this.requestTimeout });
+          // Bilibili Web Interface Search
+          const url = `https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword=${encodeURIComponent(keyword)}`;
+          const response = await CapacitorHttp.get({
+              url: url,
+              headers: this.bilibiliHeaders,
+              connectTimeout: this.requestTimeout
+          });
 
-          if (response.status === 200 && Array.isArray(response.data)) {
-              return response.data.slice(0, 5).map((item: any) => ({
-                  id: item.videoId,
-                  title: item.title,
+          if (response.status === 200 && response.data?.data?.result) {
+              return response.data.data.result.map((item: any) => ({
+                  id: item.bvid,
+                  title: item.title.replace(/<[^>]*>/g, ''), // Remove HTML tags
                   artist: item.author,
-                  album: 'YouTube',
-                  coverUrl: item.videoThumbnails?.[0]?.url || `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`,
-                  source: MusicSource.YOUTUBE,
-                  duration: item.lengthSeconds,
+                  album: 'Bilibili',
+                  coverUrl: item.pic.startsWith('//') ? `https:${item.pic}` : item.pic,
+                  source: MusicSource.BILIBILI,
+                  duration: this.parseBiliDuration(item.duration),
                   isGray: false,
-                  mvId: item.videoId
+                  mvId: item.bvid // Bilibili videos are MVs by definition
               }));
           }
       } catch (e) {
-          if (!this.customInvInstance) this.rotateInstance();
+          console.error("Bilibili Search Error", e);
       }
       return [];
   }
 
-  private rotateInstance() {
-      const idx = this.invidiousInstances.indexOf(this.currentInvInstance);
-      this.currentInvInstance = this.invidiousInstances[(idx + 1) % this.invidiousInstances.length];
+  private parseBiliDuration(durationStr: string): number {
+      if (!durationStr) return 0;
+      const parts = durationStr.split(':').map(Number);
+      if (parts.length === 2) return parts[0] * 60 + parts[1];
+      if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+      return 0;
+  }
+
+  // Updated: Robust Search with Auto-Rotation
+  private async searchYouTube(keyword: string): Promise<Song[]> {
+      const candidates = this.customInvInstance 
+          ? [this.customInvInstance, ...this.invidiousInstances] 
+          : [...this.invidiousInstances];
+
+      // Shuffle candidates lightly to distribute load if not custom
+      if (!this.customInvInstance) {
+          const rand = Math.floor(Math.random() * candidates.length);
+          const temp = candidates[0];
+          candidates[0] = candidates[rand];
+          candidates[rand] = temp;
+      }
+
+      for (const instance of candidates) {
+          try {
+              const url = `${instance}/api/v1/search?q=${encodeURIComponent(keyword)}&type=video`;
+              // Faster timeout for trying multiple instances
+              const response = await CapacitorHttp.get({ 
+                  url, 
+                  connectTimeout: 4000 
+              });
+
+              if (response.status === 200 && Array.isArray(response.data)) {
+                  this.currentInvInstance = instance; // Remember the working one
+                  return response.data.slice(0, 5).map((item: any) => ({
+                      id: item.videoId,
+                      title: item.title,
+                      artist: item.author,
+                      album: 'YouTube',
+                      coverUrl: item.videoThumbnails?.[0]?.url || `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`,
+                      source: MusicSource.YOUTUBE,
+                      duration: item.lengthSeconds,
+                      isGray: false,
+                      mvId: item.videoId
+                  }));
+              }
+          } catch (e) {
+              console.warn(`Instance failed: ${instance}`);
+              // Continue to next instance
+          }
+      }
+      
+      console.error("All YouTube instances failed.");
+      return [];
   }
 
   // --- Audio Details Logic ---
   async getSongDetails(song: Song, quality: AudioQuality = 'standard'): Promise<SongPlayDetails> {
-      // Logic same as before...
       if (song.source === MusicSource.NETEASE) {
           return this.getNeteaseDetails(song, quality);
       } else if (song.source === MusicSource.YOUTUBE) {
           const url = await this.getYouTubeUrl(song.id);
+          return { url };
+      } else if (song.source === MusicSource.BILIBILI) {
+          const url = await this.getBilibiliUrl(song.id);
           return { url };
       } else if (song.source === MusicSource.PLUGIN && (song as any).pluginId) {
           const plugin = this.plugins.find(p => p.id === (song as any).pluginId);
@@ -354,6 +470,9 @@ export class ClientSideService {
   async getMvUrl(song: Song): Promise<string | null> {
       if (song.source === MusicSource.YOUTUBE) {
            return this.getYouTubeUrl(song.id);
+      } else if (song.source === MusicSource.BILIBILI) {
+           // Reuse the logic, requests MP4
+           return this.getBilibiliUrl(song.id);
       } else if (song.source === MusicSource.NETEASE && song.mvId) {
           try {
               const url = `https://music.163.com/api/mv/detail?id=${song.mvId}&type=mp4`;
@@ -424,7 +543,47 @@ export class ClientSideService {
 
   private async getYouTubeUrl(id: string): Promise<string> {
       const targetHost = this.customInvInstance || this.currentInvInstance;
-      return `${targetHost}/latest_version?id=${id}&itag=18&local=true`;
+      // Try twice if first fails
+      try {
+          return `${targetHost}/latest_version?id=${id}&itag=18&local=true`;
+      } catch (e) {
+          this.rotateInstance();
+          const backupHost = this.customInvInstance || this.currentInvInstance;
+          return `${backupHost}/latest_version?id=${id}&itag=18&local=true`;
+      }
+  }
+
+  private async getBilibiliUrl(bvid: string): Promise<string> {
+      try {
+          // 1. Get CID
+          const viewUrl = `https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`;
+          const viewRes = await CapacitorHttp.get({
+              url: viewUrl,
+              headers: this.bilibiliHeaders
+          });
+          
+          let cid = '';
+          if (viewRes.data?.data?.cid) {
+              cid = viewRes.data.data.cid;
+          } else {
+              return '';
+          }
+
+          // 2. Get Play URL (HTML5 platform often returns standard MP4/M4A)
+          // fnval=0 or 1 usually gives mp4/flv mixed. 
+          const playUrl = `https://api.bilibili.com/x/player/playurl?bvid=${bvid}&cid=${cid}&qn=64&fnval=1&platform=html5&high_quality=1`;
+          const playRes = await CapacitorHttp.get({
+              url: playUrl,
+              headers: this.bilibiliHeaders
+          });
+          
+          if (playRes.data?.data?.durl && playRes.data.data.durl.length > 0) {
+              return playRes.data.data.durl[0].url;
+          }
+      } catch(e) {
+          console.error("Bilibili Play URL Error", e);
+      }
+      return '';
   }
   
   // ... rest of login methods
@@ -456,6 +615,11 @@ export class ClientSideService {
   async getLoginKey(): Promise<any> { return { code: 500 }; }
   async createLoginQR(key: string): Promise<any> { return { code: 500 }; }
   async checkLoginQR(key: string): Promise<any> { return { code: 500 }; }
+  
+  private rotateInstance() {
+      const idx = this.invidiousInstances.indexOf(this.currentInvInstance);
+      this.currentInvInstance = this.invidiousInstances[(idx + 1) % this.invidiousInstances.length];
+  }
 }
 
 export const musicService = new ClientSideService();

@@ -2,6 +2,7 @@
 export enum MusicSource {
   NETEASE = 'NETEASE',
   YOUTUBE = 'YOUTUBE',
+  BILIBILI = 'BILIBILI',
   LOCAL = 'LOCAL',
   PLUGIN = 'PLUGIN' // For MusicFree style plugins
 }
@@ -10,13 +11,13 @@ export interface Song {
   id: string;
   title: string;
   artist: string;
-  artistId?: string; // New: Link to artist detail
+  artistId?: string; // Link to artist detail
   album: string;
   coverUrl: string;
   source: MusicSource;
   duration: number; // in seconds
   audioUrl?: string; 
-  mvId?: string; // New: If present, song has a video
+  mvId?: string; // If present, song has a video. For Bilibili, this is the bvid.
   isGray?: boolean;
   fee?: number; // 0: free, 1: VIP, 8: SQ
   lyric?: string; // LRC format string
