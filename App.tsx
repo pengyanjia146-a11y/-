@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { musicService } from './services/geminiService';
 import { Player } from './components/Player';
@@ -15,13 +14,9 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [queue, setQueue] = useState<Song[]>([]);
   
-  // Audio Quality
   const [quality, setQuality] = useState<AudioQuality>('standard');
-
-  // Toast State
   const [toast, setToast] = useState<{msg: string, type: ToastType, show: boolean}>({ msg: '', type: 'info', show: false });
 
-  // Playlists State (Persistence)
   const [playlists, setPlaylists] = useState<Playlist[]>(() => {
       const saved = localStorage.getItem('unistream_playlists');
       return saved ? JSON.parse(saved) : [
@@ -30,12 +25,10 @@ export default function App() {
   });
   const [activePlaylist, setActivePlaylist] = useState<Playlist | null>(null);
 
-  // Persistence Effect
   useEffect(() => {
       localStorage.setItem('unistream_playlists', JSON.stringify(playlists));
   }, [playlists]);
 
-  // History State
   const [searchHistory, setSearchHistory] = useState<string[]>(() => {
       const saved = localStorage.getItem('unistream_search_history');
       return saved ? JSON.parse(saved) : [];
@@ -49,16 +42,13 @@ export default function App() {
   useEffect(() => { localStorage.setItem('unistream_search_history', JSON.stringify(searchHistory)); }, [searchHistory]);
   useEffect(() => { localStorage.setItem('unistream_play_history', JSON.stringify(playHistory)); }, [playHistory]);
 
-  // Plugins State
   const [installedPlugins, setInstalledPlugins] = useState<MusicPlugin[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pluginLoading, setPluginLoading] = useState(false);
   
-  // Latency State
   const [pings, setPings] = useState({ netease: -1, youtube: -1 });
   const [pinging, setPinging] = useState(false);
 
-  // Settings State (Persistence)
   const [settings, setSettings] = useState(() => {
       const savedSettings = localStorage.getItem('unistream_settings');
       return savedSettings ? JSON.parse(savedSettings) : {
@@ -72,16 +62,12 @@ export default function App() {
       musicService.setCustomInvidiousUrl(settings.customInvidious);
   }, [settings]);
 
-  // Search State
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Song[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
 
-  // Text Import State
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState('');
-
-  // Active Context Menu
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const showToast = (msg: string, type: ToastType = 'info') => {
@@ -91,9 +77,7 @@ export default function App() {
   useEffect(() => {
     const savedUser = localStorage.getItem('unistream_user');
     if (savedUser) {
-      try {
-        setUser(JSON.parse(savedUser));
-      } catch (e) {}
+      try { setUser(JSON.parse(savedUser)); } catch (e) {}
     }
     checkLatency();
   }, []);
@@ -127,7 +111,7 @@ export default function App() {
   const addToPlayHistory = (song: Song) => {
       setPlayHistory(prev => {
           const filtered = prev.filter(s => s.id !== song.id);
-          return [song, ...filtered].slice(0, 50); // Keep last 50
+          return [song, ...filtered].slice(0, 50); 
       });
   };
 
@@ -139,14 +123,8 @@ export default function App() {
 
     try {
         const details = await musicService.getSongDetails(song, quality);
-        
         if (details.url) {
-            const updatedSong: Song = { 
-                ...song, 
-                audioUrl: details.url, 
-                lyric: details.lyric || song.lyric 
-            };
-            
+            const updatedSong: Song = { ...song, audioUrl: details.url, lyric: details.lyric || song.lyric };
             setCurrentSong(updatedSong);
             setQueue(prev => prev.map(s => s.id === song.id ? updatedSong : s));
             setIsPlaying(true);
@@ -155,15 +133,11 @@ export default function App() {
         }
     } catch (e: any) {
         setIsPlaying(false);
-        if (e.message === "VIP_REQUIRED") {
-            showToast('VIP 歌曲，无法播放', 'error');
-        } else {
-            showToast('资源加载失败', 'error');
-        }
+        if (e.message === "VIP_REQUIRED") showToast('VIP 歌曲，无法播放', 'error');
+        else showToast('资源加载失败', 'error');
     }
   };
 
-  // Re-fetch when quality changes
   useEffect(() => {
       if(currentSong && isPlaying) {
           playSong(currentSong);
@@ -190,7 +164,7 @@ export default function App() {
   const handleDownload = async (song: Song) => {
       showToast(`正在解析: ${song.title}`, 'loading');
       try {
-          const details = await musicService.getSongDetails(song, 'lossless'); // Always try best for DL
+          const details = await musicService.getSongDetails(song, 'lossless'); 
           if (!details.url) throw new Error("No URL");
           
           showToast('开始下载...', 'loading');
@@ -256,7 +230,6 @@ export default function App() {
       e.preventDefault();
       if(!searchQuery.trim()) return;
       
-      // Save History
       if(!searchHistory.includes(searchQuery)) {
           setSearchHistory(prev => [searchQuery, ...prev].slice(0, 10));
       }
@@ -354,7 +327,6 @@ export default function App() {
               setPluginLoading(false);
           }
       };
-      
       reader.readAsText(file);
       if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -438,7 +410,6 @@ export default function App() {
                     </div>
                 </div>
                 
-                {/* User Info Card */}
                 <div onClick={() => !user ? setShowLogin(true) : null} className="bg-white/5 p-4 rounded-xl flex items-center gap-4 mb-6 cursor-pointer hover:bg-white/10 transition-colors">
                     <div className="w-16 h-16 rounded-full bg-gray-700 overflow-hidden">
                         {user?.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-400">?</div>}
@@ -493,7 +464,6 @@ export default function App() {
               </div>
           )}
           
-          {/* Import Modal */}
           {showImport && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
                   <div className="bg-dark-light rounded-xl p-6 w-full max-w-md border border-white/10">
@@ -528,7 +498,6 @@ export default function App() {
                 </div>
            </form>
 
-           {/* Search History */}
            {!searchQuery && searchHistory.length > 0 && (
                <div className="mb-8 animate-fade-in">
                    <div className="flex justify-between items-center mb-3 px-1">
@@ -672,7 +641,6 @@ export default function App() {
     <div className="min-h-screen bg-dark text-white flex flex-col md:flex-row">
       <Toast message={toast.msg} type={toast.type} isVisible={toast.show} onClose={() => setToast(t => ({...t, show: false}))} />
       
-      {/* Mobile & Desktop Nav layout remains same */}
       <div className="hidden md:flex flex-col w-64 border-r border-white/5 p-6 bg-dark">
         <div className="flex items-center gap-2 mb-10 text-xl font-bold tracking-tight">
             <div className="w-8 h-8 bg-gradient-to-br from-primary to-purple-600 rounded-lg flex items-center justify-center"><span className="text-white text-xs">U</span></div>
@@ -726,7 +694,6 @@ export default function App() {
   );
 }
 
-// ... NavBtn, MobileNavBtn, SongItem, SongItemMenu components (same as before)
 const NavBtn = ({ icon, label, active, onClick }: any) => (
   <button onClick={onClick} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${active ? 'bg-white/10 text-white font-medium' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}>
     {React.cloneElement(icon, { size: 20 })}
