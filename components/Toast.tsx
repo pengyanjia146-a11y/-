@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIcon, CloseIcon } from './Icons';
+import { ActivityIcon } from './Icons';
 
 export type ToastType = 'success' | 'error' | 'loading' | 'info';
 
@@ -19,7 +19,7 @@ export const Toast: React.FC<ToastProps> = ({ message, type, isVisible, onClose 
       if (type !== 'loading') {
         const timer = setTimeout(() => {
           setShow(false);
-          setTimeout(onClose, 300); // Wait for animation
+          setTimeout(onClose, 300);
         }, 2000);
         return () => clearTimeout(timer);
       }
