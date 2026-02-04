@@ -1,4 +1,4 @@
-name: Build Debug APK (Test)
+name: Build Debug APK (Fix Path)
 
 on:
   push:
@@ -28,8 +28,7 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-      # 🟢 修复 TS6305 报错：临时创建一个只包含 src 的 tsconfig
-      # 这样 build 就不会因为它去检查 vite.config.ts 而报错了
+      # 🟢 关键修复：include 改为 "." (根目录)，因为你的代码都在根目录
       - name: Fix TS Config & Build
         run: |
           echo '{
@@ -50,7 +49,7 @@ jobs:
               "noUnusedParameters": false,
               "noFallthroughCasesInSwitch": true
             },
-            "include": ["src"],
+            "include": ["."], 
             "exclude": ["node_modules", "dist", "vite.config.ts", "server.js"]
           }' > tsconfig.json
           
@@ -61,12 +60,10 @@ jobs:
         run: |
           npm install @capacitor/core @capacitor/cli @capacitor/android
           
-          # 自动创建安卓工程
           if [ ! -d "android" ]; then
             npx cap add android
           fi
           
-          # 同步资源
           npx cap copy android
           npx cap sync android
 
@@ -74,12 +71,10 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          # 🟢 关键：构建 Debug 包（自带签名，可直接安装）
           ./gradlew assembleDebug
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: UniStream-Debug-Installable
-          # 导出 Debug 包
           path: android/app/build/outputs/apk/debug/*.apk
