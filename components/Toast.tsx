@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Icons } from './Icons'; // 🟢 修正引用
+import { Icons } from './Icons';
 
 export type ToastType = 'success' | 'error' | 'loading' | 'info';
 
@@ -19,7 +19,7 @@ export const Toast: React.FC<ToastProps> = ({ message, type, isVisible, onClose 
       if (type !== 'loading') {
         const timer = setTimeout(() => {
           setShow(false);
-          setTimeout(onClose, 300); // Wait for animation
+          setTimeout(onClose, 300);
         }, 2000);
         return () => clearTimeout(timer);
       }
@@ -34,23 +34,10 @@ export const Toast: React.FC<ToastProps> = ({ message, type, isVisible, onClose 
   let icon = null;
 
   switch (type) {
-    case 'success':
-      bgClass = 'bg-green-600';
-      icon = <span className="text-white font-bold">✓</span>;
-      break;
-    case 'error':
-      bgClass = 'bg-red-600';
-      icon = <span className="text-white font-bold">✕</span>;
-      break;
-    case 'loading':
-      bgClass = 'bg-blue-600';
-      icon = <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>;
-      break;
-    case 'info':
-    default:
-      icon = <Icons.ActivityIcon size={16} />;
-      bgClass = 'bg-gray-700';
-      break;
+    case 'success': bgClass = 'bg-green-600'; icon = <span>✓</span>; break;
+    case 'error': bgClass = 'bg-red-600'; icon = <span>✕</span>; break;
+    case 'loading': bgClass = 'bg-blue-600'; icon = <div className="animate-spin w-4 h-4 border-2 border-white rounded-full border-t-transparent"/>; break;
+    default: bgClass = 'bg-gray-700'; icon = <Icons.ActivityIcon size={16} />; break;
   }
 
   return (
