@@ -1,16 +1,11 @@
 name: Build Release APK
 
 on:
-  workflow_dispatch: # 手动触发
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    # 🟢 关键修改 1: 在这里把密钥“映射”成环境变量
-    # 这样整个流程都能通过 env.KEYSTORE_BASE64 访问它，避免报错
-    env:
-      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-
     steps:
       - uses: actions/checkout@v4
       
@@ -36,21 +31,28 @@ jobs:
           npm install @capacitor/core @capacitor/cli @capacitor/android
           npx cap sync android
 
-      - name: Decode Keystore
-        # 🟢 关键修改 2: 这里检查的是环境变量 env，而不是 secrets
-        # 这也是修复 "Unrecognized named-value" 的唯一官方推荐解法
-        if: env.KEYSTORE_BASE64 != ''
-        run: |
-          # 注意：run 命令里依然可以用 secrets，这是完全正常的
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/release.keystore
-          echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}" > android/keystore.properties
-          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/keystore.properties
-          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/keystore.properties
-          echo "storeFile=release.keystore" >> android/keystore.properties
-
-      - name: Build Release APK
+      - name: Decode Keystore & Build
+        env:
+          # 直接把 Secret 传进环境变量，不使用 if 判断
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
           cd android
+          
+          # Shell 脚本内部判断：如果有密钥，就生成文件
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "发现密钥，正在配置签名..."
+            echo "$KEYSTORE_BASE64" | base64 --decode > app/release.keystore
+            echo "storePassword=$KEYSTORE_PASSWORD" > keystore.properties
+            echo "keyPassword=$KEY_PASSWORD" >> keystore.properties
+            echo "keyAlias=$KEY_ALIAS" >> keystore.properties
+            echo "storeFile=release.keystore" >> keystore.properties
+          else
+            echo "未发现密钥，将构建未签名版本..."
+          fi
+          
           chmod +x gradlew
           ./gradlew assembleRelease
 
