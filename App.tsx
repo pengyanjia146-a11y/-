@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { musicService } from './services/geminiService'; // Actually local service now
+import { musicService } from './services/geminiService'; // Actually hybrid service now
 import { Player } from './components/Player';
 import { LoginModal } from './components/LoginModal';
 import { HomeIcon, SearchIcon, LibraryIcon, NeteaseIcon, YouTubeIcon, PlayIcon, LabIcon, PlaylistAddIcon, PluginFileIcon, MoreVerticalIcon, HeartIcon, DownloadIcon, NextPlanIcon, SettingsIcon, FolderIcon } from './components/Icons';
@@ -85,12 +85,33 @@ export default function App() {
     localStorage.removeItem('unistream_user');
   };
 
-  const playSong = (song: Song, newQueue?: Song[]) => {
+  // UPDATED: Async playSong to fetch real URL
+  const playSong = async (song: Song, newQueue?: Song[]) => {
     setIsPlaying(false);
-    // ZERO LATENCY: Directly set the song. No timeouts.
+    
+    // Optimistic update
     setCurrentSong(song);
-    setIsPlaying(true);
+    
     if (newQueue) setQueue(newQueue);
+
+    // Fetch real URL if it's empty or needs refreshing
+    if (!song.audioUrl || song.audioUrl.length < 50) { // Simple check if it's a real url
+        try {
+            const realUrl = await musicService.getRealAudioUrl(song);
+            const updatedSong = { ...song, audioUrl: realUrl };
+            setCurrentSong(updatedSong);
+            
+            // Update queue as well so next time we play it, it has the URL
+            setQueue(prev => prev.map(s => s.id === song.id ? updatedSong : s));
+            if (view === 'SEARCH') {
+                setSearchResults(prev => prev.map(s => s.id === song.id ? updatedSong : s));
+            }
+        } catch (e) {
+            console.error("Failed to load song url", e);
+        }
+    }
+
+    setIsPlaying(true);
   };
 
   const togglePlayPause = () => setIsPlaying(!isPlaying);
@@ -112,7 +133,18 @@ export default function App() {
   // --- New Features Actions ---
 
   const handleDownload = async (song: Song) => {
-      if (!song.audioUrl) {
+      // Ensure we have a URL before downloading
+      let urlToDownload = song.audioUrl;
+      if (!urlToDownload) {
+          try {
+             urlToDownload = await musicService.getRealAudioUrl(song);
+          } catch(e) {
+             alert("无法获取下载链接");
+             return;
+          }
+      }
+
+      if (!urlToDownload) {
           alert("下载失败：无音频链接");
           return;
       }
@@ -121,24 +153,21 @@ export default function App() {
       alert(`开始下载 ${filename} ...`);
 
       try {
-        // Try to fetch as blob to force 'download' attribute behavior correctly even for cross-origin if permitted
-        // In a real scenario, this helps renaming the file.
-        const response = await fetch(song.audioUrl);
+        const response = await fetch(urlToDownload);
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
         
         const link = document.createElement('a');
         link.href = url;
-        link.download = filename; // Force .mp3 extension
+        link.download = filename; 
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
         window.URL.revokeObjectURL(url);
       } catch (e) {
-        // Fallback for CORS restricted resources (will likely play in new tab, but user can Ctrl+S)
         console.warn("Direct blob download failed (CORS), falling back to link", e);
         const link = document.createElement('a');
-        link.href = song.audioUrl;
+        link.href = urlToDownload;
         link.download = filename;
         link.target = "_blank";
         document.body.appendChild(link);
