@@ -1,12 +1,13 @@
 name: Build Release APK
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # 手动触发
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    # 🟢 修复点 1: 在 Job 级别定义环境变量，映射 Secret
+    # 🟢 关键修改 1: 在这里把密钥“映射”成环境变量
+    # 这样整个流程都能通过 env.KEYSTORE_BASE64 访问它，避免报错
     env:
       KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
 
@@ -36,9 +37,11 @@ jobs:
           npx cap sync android
 
       - name: Decode Keystore
-        # 🟢 修复点 2: 使用 env 上下文代替 secrets 上下文
+        # 🟢 关键修改 2: 这里检查的是环境变量 env，而不是 secrets
+        # 这也是修复 "Unrecognized named-value" 的唯一官方推荐解法
         if: env.KEYSTORE_BASE64 != ''
         run: |
+          # 注意：run 命令里依然可以用 secrets，这是完全正常的
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/release.keystore
           echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}" > android/keystore.properties
           echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/keystore.properties
