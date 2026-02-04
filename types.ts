@@ -1,5 +1,15 @@
-// 🟢 修改：使用字符串联合类型，兼容新代码的 'netease' | 'youtube' 写法
-export type MusicSource = 'netease' | 'youtube' | 'bilibili' | 'local' | 'plugin';
+// 🟢 核心修复：使用 const as const 模拟枚举
+// 这样既可以用 MusicSource.NETEASE (值)，也可以当做 string 类型使用
+export const MusicSource = {
+  NETEASE: 'netease',
+  YOUTUBE: 'youtube',
+  BILIBILI: 'bilibili',
+  LOCAL: 'local',
+  PLUGIN: 'plugin'
+} as const;
+
+// 导出类型：'netease' | 'youtube' | ...
+export type MusicSource = typeof MusicSource[keyof typeof MusicSource];
 
 export interface Song {
   id: string;
@@ -7,26 +17,23 @@ export interface Song {
   artist: string;
   album: string;
   
-  // 🟢 兼容性修复：新代码使用 cover，旧定义使用 coverUrl
-  // 我们同时保留两者，或者在获取数据时做映射
-  cover: string;     // 新代码 (App.tsx) 使用这个
-  coverUrl?: string; // 保留旧定义，设为可选
+  // 🟢 核心修复：统一使用 cover (App.tsx 要求的)
+  cover: string;     
+  coverUrl?: string; // 兼容旧代码，可选
   
   source: MusicSource;
   
-  // 其他原有字段保留
-  artistId?: string;
   duration?: number;
+  artistId?: string;
   audioUrl?: string; 
   mvId?: string;
   isGray?: boolean;
-  fee?: number; // 0: free, 1: VIP
-  vip?: boolean; // 新代码使用的字段
+  fee?: number; 
+  vip?: boolean;
   lyric?: string;
 }
 
-// --- 以下是你原有的定义 (全部保留) ---
-
+// 保留其他定义
 export interface Artist {
   id: string;
   name: string;
@@ -64,5 +71,4 @@ export interface MusicPlugin {
 }
 
 export type ViewState = 'HOME' | 'SEARCH' | 'LIBRARY' | 'LABS' | 'SETTINGS' | 'ARTIST_DETAIL';
-
 export type AudioQuality = 'standard' | 'exhigh' | 'lossless';
