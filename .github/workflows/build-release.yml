@@ -34,7 +34,7 @@ jobs:
       # 生成密钥库 (如果你在 GitHub Secrets 配置了 KEYSTORE_BASE64)
       # 如果没有配置，这一步会跳过，生成的 APK 将是未签名的
       - name: Decode Keystore
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        if: secrets.KEYSTORE_BASE64 != ''
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/release.keystore
           echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}" > android/keystore.properties
