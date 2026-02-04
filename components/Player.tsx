@@ -19,12 +19,12 @@ export const Player: React.FC<PlayerProps> = ({ currentSong, isPlaying, onPlayPa
   const [showLyrics, setShowLyrics] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const lyricsRef = useRef<HTMLDivElement>(null);
+  const [error, setError] = useState<string | null>(null);
   
   // Volume State
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [prevVolume, setPrevVolume] = useState(1);
-  const [showVolumeSlider, setShowVolumeSlider] = useState(false);
 
   // Background Playback (MediaSession API)
   useEffect(() => {
@@ -52,10 +52,14 @@ export const Player: React.FC<PlayerProps> = ({ currentSong, isPlaying, onPlayPa
 
   useEffect(() => {
     if (currentSong && audioRef.current) {
+        // Reset error on song change
+        setError(null);
+
         // Only update src if it's different and valid
         if (currentSong.audioUrl && audioRef.current.src !== currentSong.audioUrl) {
             audioRef.current.src = currentSong.audioUrl;
-            // No need to call load() explicitly in most modern browsers if src changes
+            // Explicitly load
+            audioRef.current.load();
         }
         
         if (isPlaying && currentSong.audioUrl) {
@@ -90,6 +94,21 @@ export const Player: React.FC<PlayerProps> = ({ currentSong, isPlaying, onPlayPa
 
   const handleEnded = () => {
       onNext();
+  };
+  
+  const handleError = (e: any) => {
+      console.error("Audio Error Event:", e);
+      if (audioRef.current?.error) {
+           console.error("Media Error Code:", audioRef.current.error.code);
+           
+           let msg = "播放失败";
+           // Android specific tips
+           if (audioRef.current.error.code === 4) msg = "资源无效 (请切换网络或稍后重试)";
+           if (audioRef.current.error.code === 3) msg = "解码错误";
+           if (audioRef.current.error.code === 2) msg = "网络错误";
+           
+           setError(msg);
+      }
   };
 
   const toggleMute = () => {
@@ -131,14 +150,12 @@ export const Player: React.FC<PlayerProps> = ({ currentSong, isPlaying, onPlayPa
 
   const currentLyrics = currentSong?.lyric ? parseLyrics(currentSong.lyric) : [];
   
-  // Auto scroll lyrics
   const activeLyricIndex = currentLyrics.findIndex((l, i) => {
       return currentTime >= l.time && (i === currentLyrics.length - 1 || currentTime < currentLyrics[i+1].time);
   });
 
   useEffect(() => {
       if (showLyrics && lyricsRef.current && activeLyricIndex !== -1) {
-          // Scroll to center
           const activeEl = lyricsRef.current.children[activeLyricIndex] as HTMLElement;
           if (activeEl) {
              activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -151,7 +168,6 @@ export const Player: React.FC<PlayerProps> = ({ currentSong, isPlaying, onPlayPa
 
   return (
     <>
-      {/* Full Screen Lyrics Overlay */}
       {showLyrics && (
         <div className="fixed inset-0 z-[60] bg-dark/95 backdrop-blur-2xl flex flex-col items-center animate-fade-in">
             <button onClick={() => setShowLyrics(false)} className="absolute top-6 right-6 text-gray-400 hover:text-white p-2">
@@ -162,6 +178,7 @@ export const Player: React.FC<PlayerProps> = ({ currentSong, isPlaying, onPlayPa
                 <img src={currentSong.coverUrl} className="w-48 h-48 rounded-2xl shadow-2xl mb-6" />
                 <h2 className="text-2xl font-bold text-white mb-2">{currentSong.title}</h2>
                 <p className="text-gray-400">{currentSong.artist}</p>
+                {error && <p className="text-red-400 mt-4 border border-red-500/30 bg-red-900/20 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">⚠️ {error}</p>}
             </div>
 
             <div ref={lyricsRef} className="flex-1 w-full max-w-lg overflow-y-auto px-6 pb-32 text-center no-scrollbar mask-image-gradient">
@@ -179,15 +196,16 @@ export const Player: React.FC<PlayerProps> = ({ currentSong, isPlaying, onPlayPa
         </div>
       )}
 
-      {/* Bottom Player */}
       <div className="fixed md:bottom-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] left-0 right-0 bg-dark/95 backdrop-blur-xl border-t border-white/10 px-4 py-3 z-50">
         <audio 
           ref={audioRef} 
           onTimeUpdate={handleTimeUpdate} 
           onEnded={handleEnded}
+          onError={handleError}
+          preload="auto"
+          crossOrigin="anonymous" 
         />
         
-        {/* Progress Bar */}
         <div className="absolute top-0 left-0 right-0 h-1 bg-white/10 cursor-pointer group">
           <div 
               className="h-full bg-gradient-to-r from-netease to-primary relative" 
@@ -198,7 +216,6 @@ export const Player: React.FC<PlayerProps> = ({ currentSong, isPlaying, onPlayPa
         </div>
 
         <div className="flex items-center justify-between max-w-7xl mx-auto h-14">
-          {/* Song Info */}
           <div className="flex items-center flex-1 min-w-0 mr-4 gap-3">
             <img 
               src={currentSong.coverUrl} 
@@ -220,11 +237,11 @@ export const Player: React.FC<PlayerProps> = ({ currentSong, isPlaying, onPlayPa
                   {currentSong.source === MusicSource.YOUTUBE && <YouTubeIcon className="w-3 h-3 text-youtube mr-1" />}
                   {currentSong.source === MusicSource.PLUGIN && <span className="text-primary font-bold">Plugin</span>}
                   <span className="ml-1 scale-90">{currentSong.source}</span>
+                  {error && <span className="ml-2 text-red-400 font-bold text-[10px] border border-red-500 rounded px-1">ERR</span>}
               </div>
             </div>
           </div>
 
-          {/* Controls */}
           <div className="flex items-center space-x-2 md:space-x-4">
              <button onClick={() => onDownload(currentSong)} className="hidden md:block text-gray-400 hover:text-white transition-colors" title="下载">
                 <DownloadIcon size={20} />
@@ -255,7 +272,6 @@ export const Player: React.FC<PlayerProps> = ({ currentSong, isPlaying, onPlayPa
               <SkipForwardIcon size={24} />
             </button>
 
-            {/* Volume Control */}
              <div className="hidden lg:flex items-center group relative w-24">
                 <button onClick={toggleMute} className="text-gray-400 hover:text-white mr-2">
                     {isMuted || volume === 0 ? <VolumeMuteIcon size={20} /> : <VolumeIcon size={20} />}
