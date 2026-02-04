@@ -1,7 +1,6 @@
 import { CapacitorHttp } from '@capacitor/core';
 import { Song, MusicSource, AudioQuality, Artist, Playlist } from "../types";
 
-// 定义播放详情返回类型
 interface SongPlayDetails {
     url: string;
     lyric?: string;
@@ -10,7 +9,6 @@ interface SongPlayDetails {
 }
 
 export class ClientSideService {
-  // 基础 Headers (伪装成 PC 端)
   private baseHeaders = {
     'Referer': 'https://music.163.com/',
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -192,6 +190,25 @@ export class ClientSideService {
         }
     });
     return allSongs;
+  }
+
+  async getDailyRecommendSongs(): Promise<Song[]> {
+      try {
+          const url = `https://music.163.com/api/v3/discovery/recommend/songs`;
+          const response = await CapacitorHttp.post({
+              url: url,
+              headers: this.getHeaders(),
+              connectTimeout: this.requestTimeout
+          });
+
+          let data = response.data;
+          if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e) {} }
+          
+          if (data && data.code === 200 && data.data && data.data.dailySongs) {
+               return data.data.dailySongs.map((item: any) => this.mapNeteaseSong(item));
+          }
+      } catch (e) { console.error("Daily Recommend Error", e); }
+      return [];
   }
 
   // --- Plugin Management (Minimal) ---
