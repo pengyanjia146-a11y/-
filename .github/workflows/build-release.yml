@@ -2,9 +2,7 @@ name: Build Release APK
 
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
@@ -31,18 +29,21 @@ jobs:
         run: npm install
 
       - name: Build Web Assets
-        run: npx vite build
+        # 🟢 确保先生成静态文件目录
+        run: npm run build
 
       - name: Setup Capacitor
         run: |
           npm install @capacitor/core @capacitor/cli @capacitor/android
-          # 🟢 修复核心：如果 android 目录不存在，则先添加 android 平台
+          # 如果没有 android 目录则添加
           if [ ! -d "android" ]; then
             npx cap add android
           fi
+          # 🟢 关键：强制将 dist 资源拷贝进安卓工程
+          npx cap copy android
           npx cap sync android
 
-      - name: Decode Keystore
+      - name: Decode Keystore (Optional)
         if: env.KEYSTORE_BASE64 != ''
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/release.keystore
@@ -51,14 +52,16 @@ jobs:
           echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/keystore.properties
           echo "storeFile=release.keystore" >> android/keystore.properties
 
-      - name: Build Release APK
+      - name: Build Android Release
         run: |
           cd android
           chmod +x gradlew
+          # 即使签名失败，也要尝试生成 Release APK
           ./gradlew assembleRelease
 
-      - name: Upload Release APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-release
+          name: UniStream-Release-Package
+          # 🟢 导出所有生成的 APK，方便排查是哪个包能用
           path: android/app/build/outputs/apk/release/*.apk
