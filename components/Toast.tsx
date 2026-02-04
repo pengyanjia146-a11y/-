@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIcon, CloseIcon } from './Icons';
+import { Icons } from './Icons'; // 🟢 修正引用
 
 export type ToastType = 'success' | 'error' | 'loading' | 'info';
 
@@ -49,7 +49,7 @@ export const Toast: React.FC<ToastProps> = ({ message, type, isVisible, onClose 
     case 'info':
     default:
       bgClass = 'bg-gray-700';
-      icon = <ActivityIcon size={16} />;
+      icon = <Icons.ActivityIcon size={16} />; // 🟢 使用 Icons.ActivityIcon
       break;
   }
 
