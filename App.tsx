@@ -510,18 +510,7 @@ export default function App() {
       checkLatency();
   };
 
-  const songItemProps = (song: Song) => ({
-      song,
-      onClick: () => playSong(song, view === 'SEARCH' ? searchResults : (view === 'LIBRARY' && activePlaylist ? activePlaylist.songs : (view === 'ARTIST_DETAIL' && activeArtist ? activeArtist.songs : queue))),
-      isCurrent: currentSong?.id === song.id,
-      onToggleLike: () => handleToggleLike(song),
-      onDownload: () => handleDownload(song),
-      onPlayNext: () => handlePlayNext(song),
-      isLiked: isLiked(song),
-      isOpenMenu: openMenuId === song.id,
-      setOpenMenu: (id: string | null) => setOpenMenuId(id),
-      onArtistClick: handleArtistClick
-  });
+ 
 
   const getLatencyColor = (ms: number) => {
       if (ms < 0) return 'text-red-500';
