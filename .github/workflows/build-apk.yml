@@ -27,33 +27,38 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      # 1. 安装依赖 (使用你项目锁定的稳定版本)
       - name: Install Dependencies
         run: npm install
 
-      # 关键步骤：使用 npx vite build 跳过 tsc 检查，防止报错
-      - name: Build Web Project (Force)
+      # 2. 构建网页 (跳过语法检查，防止报错)
+      - name: Build Web Project
         run: npx vite build
 
+      # 3. 初始化安卓环境 (使用本地版本，防止冲突)
       - name: Setup Capacitor & Android
         run: |
-          npm install @capacitor/core @capacitor/cli @capacitor/android
-          
+          # 自动初始化配置 (如果不存在)
           if [ ! -f "capacitor.config.ts" ] && [ ! -f "capacitor.config.json" ]; then
             npx cap init "UniStream" "com.unistream.music" --web-dir dist
           fi
 
+          # 添加安卓平台 (如果不存在)
           if [ ! -d "android" ]; then
             npx cap add android
           fi
 
+          # 同步代码
           npx cap sync android
 
+      # 4. 编译 APK
       - name: Build APK
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
 
+      # 5. 上传生成的 APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
