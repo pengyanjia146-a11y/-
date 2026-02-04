@@ -36,6 +36,10 @@ jobs:
       - name: Setup Capacitor
         run: |
           npm install @capacitor/core @capacitor/cli @capacitor/android
+          # 🟢 修复核心：如果 android 目录不存在，则先添加 android 平台
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
           npx cap sync android
 
       - name: Decode Keystore
