@@ -48,8 +48,8 @@ export const Toast: React.FC<ToastProps> = ({ message, type, isVisible, onClose 
       break;
     case 'info':
     default:
+      icon = <Icons.ActivityIcon size={16} />;
       bgClass = 'bg-gray-700';
-      icon = <Icons.ActivityIcon size={16} />; // 🟢 使用 Icons.ActivityIcon
       break;
   }
 
