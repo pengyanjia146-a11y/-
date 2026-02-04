@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UserProfile } from '../types';
-import { NeteaseIcon, CookieIcon, CloseIcon } from './Icons';
+import { Icons } from './Icons'; // 🟢 修正引用
 import { musicService } from '../services/geminiService';
 
 interface LoginModalProps {
@@ -19,7 +19,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLogin, onClose }) => {
       
       setLoading(true);
       try {
-          // Use the service's smart extraction
           const res = await musicService.getUserStatus(rawInput);
           
           if (res.profile) {
@@ -29,7 +28,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLogin, onClose }) => {
                   avatarUrl: res.profile.avatarUrl,
                   isVip: res.profile.vipType > 0,
                   platform: 'netease',
-                  // Save the cleaned cookie value returned by service
                   cookie: res._cleanedCookie || rawInput 
               };
               onLogin(user);
@@ -46,11 +44,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLogin, onClose }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
       <div className="bg-dark-light rounded-2xl w-full max-w-sm p-6 relative border border-white/10 shadow-2xl">
-        <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-white"><CloseIcon size={24} /></button>
+        <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-white">
+            <Icons.CloseIcon size={24} />
+        </button>
 
         <div className="flex flex-col items-center mb-6">
           <div className="w-16 h-16 bg-netease rounded-full flex items-center justify-center mb-4 shadow-lg shadow-netease/30">
-            <NeteaseIcon className="text-white w-10 h-10" />
+            <Icons.NeteaseIcon className="text-white w-10 h-10" />
           </div>
           <h2 className="text-xl font-bold">网易云音乐登录</h2>
           <p className="text-xs text-gray-400 mt-2">智能 Cookie 识别</p>
