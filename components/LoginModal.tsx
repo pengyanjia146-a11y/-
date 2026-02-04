@@ -19,6 +19,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLogin, onClose }) => {
       
       setLoading(true);
       try {
+          // Use the service's smart extraction
           const res = await musicService.getUserStatus(rawInput);
           
           if (res.profile) {
@@ -28,6 +29,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLogin, onClose }) => {
                   avatarUrl: res.profile.avatarUrl,
                   isVip: res.profile.vipType > 0,
                   platform: 'netease',
+                  // Save the cleaned cookie value returned by service
                   cookie: res._cleanedCookie || rawInput 
               };
               onLogin(user);
@@ -58,11 +60,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLogin, onClose }) => {
              <div className="bg-white/5 p-3 rounded-lg text-xs text-gray-400 leading-relaxed border border-white/5">
                 <p className="font-bold text-gray-300 mb-1">使用说明:</p>
                 <p className="mb-2">系统会自动提取粘贴内容中的核心密钥。</p>
-                <p className="text-gray-500">获取方法：</p>
+                <p className="text-gray-500">支持格式：</p>
                 <ul className="list-disc list-inside space-y-1 text-gray-400">
-                    <li>PC 浏览器 F12 → Network</li>
-                    <li>找到任意请求 → Request Headers</li>
-                    <li>复制 Cookie 的整段内容</li>
+                    <li>完整 Request Headers</li>
+                    <li>完整 Cookie 字符串</li>
+                    <li>单独的 MUSIC_U 值</li>
                 </ul>
              </div>
             <textarea 

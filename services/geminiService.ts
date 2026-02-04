@@ -1,13 +1,17 @@
 import { CapacitorHttp } from '@capacitor/core';
 import { Song, MusicSource, AudioQuality } from "../types";
 
+// Define a richer return type for playback details
 interface SongPlayDetails {
     url: string;
     lyric?: string;
+    coverUrl?: string; // Update cover if higher quality found
 }
 
 export class ClientSideService {
 
+  // Privacy: Removed Hardcoded Cookies.
+  // Privacy: We generate random NMTID and DeviceID for guests to mimic real traffic.
   private baseHeaders = {
     'Referer': 'https://music.163.com/',
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -25,7 +29,10 @@ export class ClientSideService {
   ];
   private currentInvInstance = this.invidiousInstances[0];
   private customInvInstance = '';
+  
   private plugins: any[] = [];
+  
+  // Guest Identity
   private guestCookie = '';
 
   constructor() {
@@ -33,6 +40,7 @@ export class ClientSideService {
     this.generateGuestHeaders();
   }
   
+  // Generate random Hex string
   private randomHex(length: number) {
       let result = '';
       const characters = '0123456789abcdef';
@@ -43,6 +51,7 @@ export class ClientSideService {
   }
 
   private generateGuestHeaders() {
+      // Mimic NMTID and DeviceId for better guest access rates
       const nmtid = this.randomHex(32);
       const deviceId = this.randomHex(16);
       this.guestCookie = `os=pc; appver=2.9.7; NMTID=${nmtid}; DeviceId=${deviceId};`;
@@ -52,16 +61,16 @@ export class ClientSideService {
       this.customInvInstance = url ? url.replace(/\/$/, '') : '';
   }
 
+  // --- 智能 Headers 构造 ---
   private getHeaders() {
       const savedUser = localStorage.getItem('unistream_user');
-      let cookieStr = this.guestCookie; 
+      let cookieStr = this.guestCookie; // Default to guest
 
       if (savedUser) {
           try {
               const userData = JSON.parse(savedUser);
               if (userData.cookie && userData.cookie.length > 5) {
                   let targetCookie = userData.cookie;
-                  // 智能合并用户 Cookie
                   if (targetCookie.includes('MUSIC_U=')) {
                        if (!targetCookie.includes('os=pc')) cookieStr = `os=pc; appver=2.9.7; ${targetCookie}`;
                        else cookieStr = targetCookie; 
@@ -78,6 +87,7 @@ export class ClientSideService {
       };
   }
 
+  // --- Latency / Ping Test ---
   async getPings(): Promise<{ netease: number; youtube: number }> {
       const start = Date.now();
       let netease = -1;
@@ -103,6 +113,7 @@ export class ClientSideService {
       return { netease, youtube };
   }
 
+  // --- Plugin Management ---
   async installPluginFromUrl(url: string): Promise<boolean> {
       try {
           const response = await CapacitorHttp.get({ url });
@@ -137,6 +148,39 @@ export class ClientSideService {
   getPlugins() { return this.plugins; }
   removePlugin(id: string) { this.plugins = this.plugins.filter(p => p.id !== id); }
 
+  // --- Playlist Import Logic ---
+  async importNeteasePlaylist(playlistId: string): Promise<Song[]> {
+      try {
+          // Use the Detail API which often contains trackIds
+          const url = `https://music.163.com/api/v3/playlist/detail?id=${playlistId}&n=1000&s=8`;
+          const response = await CapacitorHttp.get({
+              url: url,
+              headers: this.getHeaders()
+          });
+
+          let data = response.data;
+          if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e) {} }
+
+          if (data && data.playlist && data.playlist.tracks) {
+              return data.playlist.tracks.map((item: any) => ({
+                  id: String(item.id),
+                  title: item.name,
+                  artist: item.ar ? item.ar.map((a: any) => a.name).join('/') : 'Unknown',
+                  album: item.al ? item.al.name : '',
+                  coverUrl: item.al?.picUrl ? item.al.picUrl.replace(/^http:/, 'https:') : '',
+                  source: MusicSource.NETEASE,
+                  duration: Math.floor(item.dt / 1000),
+                  isGray: false,
+                  fee: item.fee
+              }));
+          }
+      } catch (e) {
+          console.error("Playlist Import Error", e);
+      }
+      return [];
+  }
+
+  // --- Search Logic ---
   async searchMusic(query: string): Promise<Song[]> {
     const promises = [
         this.searchNetease(query),
@@ -205,7 +249,8 @@ export class ClientSideService {
       const targetHost = this.customInvInstance || this.currentInvInstance;
       try {
           const url = `${targetHost}/api/v1/search?q=${encodeURIComponent(keyword)}&type=video`;
-          const response = await CapacitorHttp.get({ url, connectTimeout: 8000 });
+          // Increased timeout to 20s as requested to reduce failures
+          const response = await CapacitorHttp.get({ url, connectTimeout: 20000 });
 
           if (response.status === 200 && Array.isArray(response.data)) {
               return response.data.slice(0, 5).map((item: any) => ({
@@ -229,6 +274,8 @@ export class ClientSideService {
       const idx = this.invidiousInstances.indexOf(this.currentInvInstance);
       this.currentInvInstance = this.invidiousInstances[(idx + 1) % this.invidiousInstances.length];
   }
+
+  // --- Audio Details Logic ---
   
   async getSongDetails(song: Song, quality: AudioQuality = 'standard'): Promise<SongPlayDetails> {
       if (song.source === MusicSource.NETEASE) {
@@ -242,10 +289,13 @@ export class ClientSideService {
               const url = await plugin.getMediaUrl(song);
               return { url };
           }
+      } else if (song.source === MusicSource.LOCAL && song.audioUrl) {
+          return { url: song.audioUrl };
       }
       return { url: '' };
   }
 
+  // Keeping this for reference, though new download uses window.open
   async downloadSongBlob(url: string): Promise<Blob | null> {
     try {
         const response = await CapacitorHttp.get({
@@ -323,6 +373,7 @@ export class ClientSideService {
       return `${targetHost}/latest_version?id=${id}&itag=140&local=true`;
   }
 
+  // --- Login ---
   async getUserStatus(cookieInput: string): Promise<any> { 
       try {
           let finalCookie = cookieInput.trim();
