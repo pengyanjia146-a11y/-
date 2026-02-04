@@ -1,17 +1,13 @@
 import React from 'react';
-// 引入 Lucide 图标用于 UI 控制
+// 引入 Lucide 图标
 import { 
   Play, Pause, SkipBack, SkipForward, Search, Home, Library, User, 
   X, Loader2, Shuffle, Repeat, Repeat1, Cookie, Activity, LogOut, Cloud 
 } from 'lucide-react';
 
-// --- 以下是你原有的 SVG 图标 (保留不动) ---
+// --- 原生 SVG 图标 (保留) ---
 
-interface IconProps {
-  size?: number;
-  className?: string;
-  fill?: string;
-}
+interface IconProps { size?: number; className?: string; fill?: string; }
 
 export const NeteaseIcon = ({ size = 24, className, fill = "currentColor" }: IconProps) => (
   <svg width={size} height={size} className={className} viewBox="0 0 24 24" fill={fill}>
@@ -31,34 +27,19 @@ export const BilibiliIcon = ({ size = 24, className, fill = "currentColor" }: Ic
   </svg>
 );
 
-// --- 统一导出对象 (供新代码使用) ---
+// --- 统一导出对象 ---
 export const Icons = {
-  // Lucide UI 图标
-  Play,
-  Pause,
-  SkipBack,
-  SkipForward,
-  Search,
-  Home,
-  Library,
-  User,
-  X,
-  Loader: Loader2,
-  Shuffle,
-  Repeat,
-  Repeat1,
+  Play, Pause, SkipBack, SkipForward, Search, Home, Library, User, 
+  X, Loader: Loader2, Shuffle, Repeat, Repeat1,
   
-  // 别名导出 (修复报错)
+  // 🟢 修复报错的关键导出
   CloseIcon: X,
   CookieIcon: Cookie,
   ActivityIcon: Activity,
   LogoutIcon: LogOut,
-
-  // 品牌图标：优先使用你原本的高清 SVG
-  NeteaseIcon: NeteaseIcon,
-  YouTubeIcon: YouTubeIcon,
-  BilibiliIcon: BilibiliIcon,
+  NeteaseIcon,
+  YouTubeIcon,
+  BilibiliIcon,
   
-  // 备用
-  Cloud
+  Cloud // 备用
 };
