@@ -1,45 +1,88 @@
-import React from 'react';
-// 引入 Lucide 图标
-import { 
-  Play, Pause, SkipBack, SkipForward, Search, Home, Library, User, 
-  X, Loader2, Shuffle, Repeat, Repeat1, Cookie, Activity, LogOut, Cloud 
-} from 'lucide-react';
+import React, { useState } from 'react';
+import { UserProfile } from '../types';
+import { Icons } from './Icons'; // 🟢 修正引用：只导入 Icons 对象
+import { musicService } from '../services/geminiService';
 
-// --- 原生 SVG 图标 (保留) ---
+interface LoginModalProps {
+  onLogin: (user: UserProfile) => void;
+  onClose: () => void;
+}
 
-interface IconProps { size?: number; className?: string; fill?: string; }
+export const LoginModal: React.FC<LoginModalProps> = ({ onLogin, onClose }) => {
+  const [cookieVal, setCookieVal] = useState('');
+  const [loading, setLoading] = useState(false);
 
-export const NeteaseIcon = ({ size = 24, className, fill = "currentColor" }: IconProps) => (
-  <svg width={size} height={size} className={className} viewBox="0 0 24 24" fill={fill}>
-    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5zm0-5.5c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1z"/>
-  </svg>
-);
+  const handleCookieLogin = async (e: React.FormEvent) => {
+      e.preventDefault();
+      const rawInput = cookieVal.trim();
+      if (!rawInput) return;
+      
+      setLoading(true);
+      try {
+          const res = await musicService.getUserStatus(rawInput);
+          
+          if (res.profile) {
+              const user: UserProfile = {
+                  id: String(res.profile.userId),
+                  nickname: res.profile.nickname,
+                  avatarUrl: res.profile.avatarUrl,
+                  isVip: res.profile.vipType > 0,
+                  platform: 'netease',
+                  cookie: res._cleanedCookie || rawInput 
+              };
+              onLogin(user);
+          } else {
+              alert("登录失败：未检测到有效 Cookie。\n请确保粘贴内容中包含 MUSIC_U。");
+          }
+      } catch (e) {
+          alert("登录请求失败，请检查网络");
+      } finally {
+          setLoading(false);
+      }
+  };
 
-export const YouTubeIcon = ({ size = 24, className, fill = "currentColor" }: IconProps) => (
-  <svg width={size} height={size} className={className} viewBox="0 0 24 24" fill={fill}>
-    <path d="M19.615 3.184c-3.604-.246-11.631-.245-15.23 0-3.897.266-4.356 2.62-4.385 8.816.029 6.185.484 8.549 4.385 8.816 3.6.245 11.626.246 15.23 0 3.897-.266 4.356-2.62 4.385-8.816-.029-6.185-.484-8.549-4.385-8.816zm-10.615 12.816v-8l8 3.993-8 4.007z"/>
-  </svg>
-);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
+      <div className="bg-dark-light rounded-2xl w-full max-w-sm p-6 relative border border-white/10 shadow-2xl">
+        <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-white">
+            <Icons.CloseIcon size={24} /> {/* 🟢 使用 Icons.CloseIcon */}
+        </button>
 
-export const BilibiliIcon = ({ size = 24, className, fill = "currentColor" }: IconProps) => (
-  <svg width={size} height={size} className={className} viewBox="0 0 24 24" fill={fill}>
-    <path d="M18.7 5.3h-2.6l1-2.6c.1-.3-.2-.6-.5-.5-.1 0-.2.1-.2.2l-1.3 3.3h-6L7.9 2.4c0-.3-.4-.4-.5-.2-.1.1-.1.2-.1.2l1 2.9H5.3C2.4 5.3 0 7.7 0 10.6v8c0 2.9 2.4 5.3 5.3 5.3h13.3c2.9 0 5.3-2.4 5.3-5.3v-8c.1-2.9-2.3-5.3-5.2-5.3zm-10 11.4c-1.1 0-1.9-.9-1.9-1.9s.9-1.9 1.9-1.9 1.9.9 1.9 1.9-.9 1.9-1.9 1.9zm10.7 0c-1.1 0-1.9-.9-1.9-1.9s.9-1.9 1.9-1.9 1.9.9 1.9 1.9-.9 1.9-1.9 1.9z"/>
-  </svg>
-);
+        <div className="flex flex-col items-center mb-6">
+          <div className="w-16 h-16 bg-netease rounded-full flex items-center justify-center mb-4 shadow-lg shadow-netease/30">
+            <Icons.NeteaseIcon className="text-white w-10 h-10" />
+          </div>
+          <h2 className="text-xl font-bold">网易云音乐登录</h2>
+          <p className="text-xs text-gray-400 mt-2">智能 Cookie 识别</p>
+        </div>
 
-// --- 统一导出对象 ---
-export const Icons = {
-  Play, Pause, SkipBack, SkipForward, Search, Home, Library, User, 
-  X, Loader: Loader2, Shuffle, Repeat, Repeat1,
-  
-  // 🟢 修复报错的关键导出
-  CloseIcon: X,
-  CookieIcon: Cookie,
-  ActivityIcon: Activity,
-  LogoutIcon: LogOut,
-  NeteaseIcon,
-  YouTubeIcon,
-  BilibiliIcon,
-  
-  Cloud // 备用
+        <form onSubmit={handleCookieLogin} className="flex flex-col space-y-4 animate-fade-in">
+             <div className="bg-white/5 p-3 rounded-lg text-xs text-gray-400 leading-relaxed border border-white/5">
+                <p className="font-bold text-gray-300 mb-1">使用说明:</p>
+                <p className="mb-2">系统会自动提取粘贴内容中的核心密钥。</p>
+                <p className="text-gray-500">支持格式：</p>
+                <ul className="list-disc list-inside space-y-1 text-gray-400">
+                    <li>完整 Request Headers</li>
+                    <li>完整 Cookie 字符串</li>
+                    <li>单独的 MUSIC_U 值</li>
+                </ul>
+             </div>
+            <textarea 
+              placeholder="请粘贴 Cookie 内容..." 
+              value={cookieVal}
+              onChange={(e) => setCookieVal(e.target.value)}
+              className="w-full h-24 bg-black/30 border border-white/10 rounded-lg p-3 text-xs focus:border-netease focus:outline-none transition-colors font-mono resize-none"
+              required
+            />
+            <button 
+              type="submit" 
+              disabled={loading}
+              className="w-full bg-netease hover:bg-red-700 text-white font-bold py-3 rounded-lg transition-colors flex items-center justify-center"
+            >
+              {loading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : "智 能 识 别 并 登 录"}
+            </button>
+        </form>
+      </div>
+    </div>
+  );
 };
