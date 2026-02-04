@@ -19,7 +19,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLogin, onClose }) => {
       
       setLoading(true);
       try {
-          // 只传 MUSIC_U 的值去验证
+          // 智能识别：交给 Service 处理格式，支持整段粘贴
           const res = await musicService.getUserStatus(cleanVal);
           
           if (res.profile) {
@@ -29,11 +29,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLogin, onClose }) => {
                   avatarUrl: res.profile.avatarUrl,
                   isVip: res.profile.vipType > 0,
                   platform: 'netease',
-                  cookie: cleanVal // 只保存 MUSIC_U 的值
+                  cookie: cleanVal 
               };
               onLogin(user);
           } else {
-              alert("登录失败：MUSIC_U 无效或已过期。\n请确保只复制了 MUSIC_U 的值，不要包含分号或其他内容。");
+              alert("登录失败：Cookie 无效或已过期。\n请尝试重新复制 Network 面板里的完整 Cookie 值。");
           }
       } catch (e) {
           alert("登录请求失败，请检查网络");
@@ -52,26 +52,25 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLogin, onClose }) => {
             <NeteaseIcon className="text-white w-10 h-10" />
           </div>
           <h2 className="text-xl font-bold">网易云音乐登录</h2>
-          <p className="text-xs text-gray-400 mt-2">Serverless 模式 • 仅需核心密钥</p>
+          <p className="text-xs text-gray-400 mt-2">Serverless 模式 • 纯本地代理</p>
         </div>
 
         <form onSubmit={handleCookieLogin} className="flex flex-col space-y-4 animate-fade-in">
              <div className="bg-white/5 p-3 rounded-lg text-xs text-gray-400 leading-relaxed border border-white/5">
-                <p className="font-bold text-gray-300 mb-1">仅需 MUSIC_U:</p>
-                <p>为了解决卡顿问题，现在只需填入核心密钥。</p>
+                <p className="font-bold text-gray-300 mb-1">如何获取 Cookie:</p>
                 <ol className="list-decimal list-inside space-y-1 mt-2">
-                    <li>PC 浏览器 F12 -> Application -> Cookies</li>
-                    <li>找到 <span className="text-netease font-bold">MUSIC_U</span></li>
-                    <li>仅复制它的 <span className="text-white bg-white/10 px-1 rounded">Value (值)</span></li>
-                    <li>值通常以 <code className="text-yellow-500">abcd...</code> 开头，不包含 <code className="text-yellow-500">MUSIC_U=</code> 前缀</li>
+                    {/* 修复：使用特殊字符 → 代替 -> 以修复构建报错 */}
+                    <li>PC 浏览器按 F12 → Network (网络)</li>
+                    <li>刷新网页 → 点击任意请求 (如 list?...)</li>
+                    <li>找到 <span className="text-netease font-bold">Request Headers</span> 下的 Cookie</li>
+                    <li><span className="text-white bg-white/10 px-1 rounded">直接复制整段内容</span> (包含 MUSIC_U 等)</li>
                 </ol>
              </div>
-            <input 
-              type="text"
-              placeholder="粘贴 MUSIC_U 的值 (例如: 0055799...)" 
+            <textarea 
+              placeholder="在这里粘贴 Cookie..." 
               value={cookieVal}
               onChange={(e) => setCookieVal(e.target.value)}
-              className="w-full bg-black/30 border border-white/10 rounded-lg p-3 text-sm focus:border-netease focus:outline-none transition-colors font-mono"
+              className="w-full h-24 bg-black/30 border border-white/10 rounded-lg p-3 text-xs focus:border-netease focus:outline-none transition-colors font-mono resize-none"
               required
             />
             <button 
@@ -86,7 +85,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLogin, onClose }) => {
         <div className="mt-6 flex justify-center border-t border-white/5 pt-4">
              <div className="text-[10px] text-gray-500 flex items-center gap-1">
                  <CookieIcon size={12} />
-                 <span>数据仅存储在本地，安全无忧</span>
+                 <span>数据仅存储在本地，不经过任何服务器</span>
              </div>
         </div>
       </div>
