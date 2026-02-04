@@ -1,27 +1,31 @@
-
-export enum MusicSource {
-  NETEASE = 'NETEASE',
-  YOUTUBE = 'YOUTUBE',
-  BILIBILI = 'BILIBILI',
-  LOCAL = 'LOCAL',
-  PLUGIN = 'PLUGIN' // For MusicFree style plugins
-}
+// 🟢 修改：使用字符串联合类型，兼容新代码的 'netease' | 'youtube' 写法
+export type MusicSource = 'netease' | 'youtube' | 'bilibili' | 'local' | 'plugin';
 
 export interface Song {
   id: string;
   title: string;
   artist: string;
-  artistId?: string; // Link to artist detail
   album: string;
-  coverUrl: string;
+  
+  // 🟢 兼容性修复：新代码使用 cover，旧定义使用 coverUrl
+  // 我们同时保留两者，或者在获取数据时做映射
+  cover: string;     // 新代码 (App.tsx) 使用这个
+  coverUrl?: string; // 保留旧定义，设为可选
+  
   source: MusicSource;
-  duration: number; // in seconds
+  
+  // 其他原有字段保留
+  artistId?: string;
+  duration?: number;
   audioUrl?: string; 
-  mvId?: string; // If present, song has a video. For Bilibili, this is the bvid.
+  mvId?: string;
   isGray?: boolean;
-  fee?: number; // 0: free, 1: VIP, 8: SQ
-  lyric?: string; // LRC format string
+  fee?: number; // 0: free, 1: VIP
+  vip?: boolean; // 新代码使用的字段
+  lyric?: string;
 }
+
+// --- 以下是你原有的定义 (全部保留) ---
 
 export interface Artist {
   id: string;
@@ -37,7 +41,7 @@ export interface Playlist {
   description?: string;
   songs: Song[];
   coverUrl?: string;
-  isSystem?: boolean; // e.g. "My Favorites"
+  isSystem?: boolean;
 }
 
 export interface UserProfile {
@@ -46,7 +50,7 @@ export interface UserProfile {
   avatarUrl: string;
   isVip: boolean;
   platform: 'netease' | 'guest';
-  cookie?: string; // Store session cookie (MUSIC_U value)
+  cookie?: string;
 }
 
 export interface MusicPlugin {
@@ -54,9 +58,9 @@ export interface MusicPlugin {
     name: string;
     version: string;
     author: string;
-    sources: string[]; // e.g., ['kugou', 'bilibili']
+    sources: string[];
     status: 'active' | 'disabled';
-    srcUrl?: string; // Where it was loaded from
+    srcUrl?: string;
 }
 
 export type ViewState = 'HOME' | 'SEARCH' | 'LIBRARY' | 'LABS' | 'SETTINGS' | 'ARTIST_DETAIL';
