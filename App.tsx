@@ -3,8 +3,8 @@ import { musicService } from './services/geminiService';
 import { Player } from './components/Player';
 import { LoginModal } from './components/LoginModal';
 import { Toast, ToastType } from './components/Toast';
-import { HomeIcon, SearchIcon, LibraryIcon, NeteaseIcon, YouTubeIcon, PlayIcon, LabIcon, PlaylistAddIcon, PluginFileIcon, MoreVerticalIcon, HeartIcon, DownloadIcon, NextPlanIcon, SettingsIcon, FolderIcon, ActivityIcon, TrashIcon } from './components/Icons';
-import { Song, UserProfile, ViewState, MusicSource, Playlist, MusicPlugin, AudioQuality } from './types';
+import { HomeIcon, SearchIcon, LibraryIcon, NeteaseIcon, YouTubeIcon, PlayIcon, LabIcon, PlaylistAddIcon, PluginFileIcon, MoreVerticalIcon, HeartIcon, DownloadIcon, NextPlanIcon, SettingsIcon, FolderIcon, ActivityIcon, TrashIcon, UserCheckIcon, UserPlusIcon } from './components/Icons';
+import { Song, UserProfile, ViewState, MusicSource, Playlist, MusicPlugin, AudioQuality, Artist } from './types';
 
 export default function App() {
   const [view, setView] = useState<ViewState>('HOME');
@@ -32,10 +32,18 @@ export default function App() {
   });
   const [activePlaylist, setActivePlaylist] = useState<Playlist | null>(null);
 
+  // Followed Artists State
+  const [followedArtists, setFollowedArtists] = useState<Artist[]>(() => {
+      const saved = localStorage.getItem('unistream_artists');
+      return saved ? JSON.parse(saved) : [];
+  });
+  const [activeArtist, setActiveArtist] = useState<{info: Artist, songs: Song[]} | null>(null);
+
   // Persistence Effect
   useEffect(() => {
       localStorage.setItem('unistream_playlists', JSON.stringify(playlists));
-  }, [playlists]);
+      localStorage.setItem('unistream_artists', JSON.stringify(followedArtists));
+  }, [playlists, followedArtists]);
 
   // History State
   const [searchHistory, setSearchHistory] = useState<string[]>(() => {
@@ -64,15 +72,18 @@ export default function App() {
   // Settings State (Persistence)
   const [settings, setSettings] = useState(() => {
       const savedSettings = localStorage.getItem('unistream_settings');
-      return savedSettings ? JSON.parse(savedSettings) : {
+      const defaults = {
           downloadPath: 'Internal Storage/Music/UniStream',
           customInvidious: '',
+          searchTimeout: 15 // Default 15s
       };
+      return savedSettings ? { ...defaults, ...JSON.parse(savedSettings) } : defaults;
   });
 
   useEffect(() => {
       localStorage.setItem('unistream_settings', JSON.stringify(settings));
       musicService.setCustomInvidiousUrl(settings.customInvidious);
+      musicService.setSearchTimeout((settings.searchTimeout || 15) * 1000);
   }, [settings]);
 
   // Search State
@@ -245,6 +256,32 @@ export default function App() {
       if (!song) return false;
       return playlists.find(p => p.id === 'fav')?.songs.some(s => s.id === song.id) || false;
   };
+
+  // --- Artist Logic ---
+  const handleArtistClick = async (artistId: string) => {
+      if (!artistId) return;
+      showToast('正在获取歌手信息...', 'loading');
+      try {
+          const { artist, songs } = await musicService.getArtistDetail(artistId);
+          setActiveArtist({ info: artist, songs });
+          setView('ARTIST_DETAIL');
+      } catch (e) {
+          showToast('获取歌手信息失败', 'error');
+      }
+  };
+
+  const toggleFollowArtist = (artist: Artist) => {
+      const exists = followedArtists.some(a => a.id === artist.id);
+      if (exists) {
+          setFollowedArtists(prev => prev.filter(a => a.id !== artist.id));
+          showToast('已取消关注', 'info');
+      } else {
+          setFollowedArtists(prev => [...prev, artist]);
+          showToast('已关注歌手', 'success');
+      }
+  };
+
+  const isFollowed = (artistId: string) => followedArtists.some(a => a.id === artistId);
 
   const handleSearch = async (e: React.FormEvent) => {
       e.preventDefault();
@@ -424,14 +461,15 @@ export default function App() {
 
   const songItemProps = (song: Song) => ({
       song,
-      onClick: () => playSong(song, view === 'SEARCH' ? searchResults : (view === 'LIBRARY' && activePlaylist ? activePlaylist.songs : queue)),
+      onClick: () => playSong(song, view === 'SEARCH' ? searchResults : (view === 'LIBRARY' && activePlaylist ? activePlaylist.songs : (view === 'ARTIST_DETAIL' && activeArtist ? activeArtist.songs : queue))),
       isCurrent: currentSong?.id === song.id,
       onToggleLike: () => handleToggleLike(song),
       onDownload: () => handleDownload(song),
       onPlayNext: () => handlePlayNext(song),
       isLiked: isLiked(song),
       isOpenMenu: openMenuId === song.id,
-      setOpenMenu: (id: string | null) => setOpenMenuId(id)
+      setOpenMenu: (id: string | null) => setOpenMenuId(id),
+      onArtistClick: handleArtistClick
   });
 
   const getLatencyColor = (ms: number) => {
@@ -447,8 +485,8 @@ export default function App() {
         <div className="relative z-10 w-full">
           <h1 className="text-3xl font-bold mb-2">UniStream</h1>
           <p className="text-gray-200 mb-4 max-w-md text-sm md:text-base">
-            聚合音乐播放器 V2.1<br/>
-            <span className="text-xs opacity-75">全屏歌词 / 歌单导入 / 本地音乐</span>
+            聚合音乐播放器 V2.2<br/>
+            <span className="text-xs opacity-75">全屏歌词 / 歌手关注 / 视频播放</span>
           </p>
           <div className="flex gap-2">
              <div className="text-xs bg-white/20 px-2 py-1 rounded">访客身份已生成</div>
@@ -514,6 +552,23 @@ export default function App() {
                     {user && <button onClick={(e) => {e.stopPropagation(); handleLogout();}} className="ml-auto text-xs text-red-400 border border-red-400 px-2 py-1 rounded">退出</button>}
                 </div>
 
+                {/* Followed Artists Section */}
+                <div className="mb-6">
+                    <h3 className="font-bold text-lg mb-3">关注歌手</h3>
+                    {followedArtists.length === 0 ? (
+                        <p className="text-xs text-gray-500">暂无关注</p>
+                    ) : (
+                        <div className="flex gap-4 overflow-x-auto no-scrollbar pb-2">
+                             {followedArtists.map(artist => (
+                                 <div key={artist.id} className="flex-shrink-0 w-20 text-center cursor-pointer" onClick={() => handleArtistClick(artist.id)}>
+                                     <img src={artist.coverUrl} className="w-20 h-20 rounded-full object-cover mb-2 border-2 border-transparent hover:border-primary transition-colors" />
+                                     <p className="text-xs truncate">{artist.name}</p>
+                                 </div>
+                             ))}
+                        </div>
+                    )}
+                </div>
+
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                     {playlists.map(pl => (
                         <div key={pl.id} onClick={() => setActivePlaylist(pl)} className="group cursor-pointer">
@@ -549,7 +604,7 @@ export default function App() {
                                   <div className="text-xs text-gray-400 truncate">{song.artist}</div>
                               </div>
                               <div className="absolute right-2 top-1/2 -translate-y-1/2">
-                                 <SongItemMenu song={song} isLiked={isLiked(song)} onToggleLike={() => handleToggleLike(song)} onDownload={() => handleDownload(song)} onPlayNext={() => handlePlayNext(song)} isOpen={openMenuId === song.id} setOpen={(v) => setOpenMenuId(v ? song.id : null)} />
+                                 <SongItemMenu song={song} isLiked={isLiked(song)} onToggleLike={() => handleToggleLike(song)} onDownload={() => handleDownload(song)} onPlayNext={() => handlePlayNext(song)} isOpen={openMenuId === song.id} setOpen={(v) => setOpenMenuId(v ? song.id : null)} onArtistClick={handleArtistClick} />
                               </div>
                           </div>
                       ))}
@@ -598,6 +653,49 @@ export default function App() {
           )}
       </div>
   );
+  
+  // New Artist Detail View
+  const renderArtistDetail = () => {
+      if (!activeArtist) return null;
+      const isFollowedArtist = isFollowed(activeArtist.info.id);
+
+      return (
+          <div className="pb-24 animate-fade-in">
+               <button onClick={() => setView('LIBRARY')} className="text-sm text-gray-400 hover:text-white mb-4 flex items-center gap-1">← 返回我的音乐</button>
+               <div className="flex flex-col md:flex-row items-center gap-6 mb-8">
+                   <img src={activeArtist.info.coverUrl} className="w-40 h-40 rounded-full object-cover shadow-2xl border-4 border-white/10" />
+                   <div className="text-center md:text-left">
+                       <h2 className="text-3xl font-bold mb-2">{activeArtist.info.name}</h2>
+                       <p className="text-gray-400 text-sm mb-4 line-clamp-3 max-w-lg">{activeArtist.info.description || '暂无简介'}</p>
+                       <div className="flex gap-3 justify-center md:justify-start">
+                           <button onClick={() => toggleFollowArtist(activeArtist.info)} className={`px-6 py-2 rounded-full text-sm font-bold flex items-center gap-2 transition-colors ${isFollowedArtist ? 'bg-white/10 text-white' : 'bg-netease text-white'}`}>
+                               {isFollowedArtist ? <><UserCheckIcon size={16}/> 已关注</> : <><UserPlusIcon size={16}/> 关注</>}
+                           </button>
+                           <button onClick={() => playSong(activeArtist.songs[0], activeArtist.songs)} className="bg-primary hover:bg-indigo-600 text-white px-6 py-2 rounded-full flex items-center gap-2">
+                                <PlayIcon className="w-4 h-4 fill-current" /> 播放热门
+                          </button>
+                       </div>
+                   </div>
+               </div>
+               
+               <h3 className="font-bold text-xl mb-4">热门 50 首</h3>
+               <div className="space-y-1">
+                   {activeArtist.songs.map((song, idx) => (
+                      <div key={idx} className="flex items-center group p-3 rounded-lg hover:bg-white/5 relative">
+                          <span className="text-gray-500 w-8 text-center">{idx + 1}</span>
+                          <div className="flex-1 cursor-pointer min-w-0 mr-12" onClick={() => playSong(song, activeArtist.songs)}>
+                              <div className={`font-medium truncate ${currentSong?.id === song.id ? 'text-primary' : 'text-white'}`}>{song.title}</div>
+                              <div className="text-xs text-gray-400 truncate">{song.album}</div>
+                          </div>
+                          <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                             <SongItemMenu song={song} isLiked={isLiked(song)} onToggleLike={() => handleToggleLike(song)} onDownload={() => handleDownload(song)} onPlayNext={() => handlePlayNext(song)} isOpen={openMenuId === song.id} setOpen={(v) => setOpenMenuId(v ? song.id : null)} />
+                          </div>
+                      </div>
+                   ))}
+               </div>
+          </div>
+      );
+  };
 
   const renderSearch = () => {
       // Filter logic
@@ -751,6 +849,24 @@ export default function App() {
                       </div>
                   </div>
               </div>
+
+               <div className="bg-dark-light p-5 rounded-xl border border-white/5">
+                  <h3 className="font-bold text-white mb-4 flex items-center gap-2"><ActivityIcon className="text-blue-400 w-5 h-5" /> 网络设置</h3>
+                  <div className="space-y-4">
+                      <div>
+                          <label className="block text-xs text-gray-400 mb-2">搜索超时时间 (秒)</label>
+                          <input 
+                              type="number" 
+                              min="5"
+                              max="60"
+                              value={settings.searchTimeout} 
+                              onChange={(e) => setSettings(s => ({ ...s, searchTimeout: parseInt(e.target.value) || 15 }))}
+                              className="bg-black/30 w-full p-3 rounded-lg border border-white/10 text-sm text-gray-300 focus:outline-none focus:border-blue-500"
+                          />
+                          <p className="text-[10px] text-gray-500 mt-2">如果搜索 B站/YouTube 经常失败，请尝试调大此数值 (默认 15秒)。</p>
+                      </div>
+                  </div>
+              </div>
           </div>
       </div>
   );
@@ -781,6 +897,7 @@ export default function App() {
           {view === 'SEARCH' && renderSearch()}
           {view === 'LABS' && renderLabs()}
           {view === 'LIBRARY' && renderLibrary()}
+          {view === 'ARTIST_DETAIL' && renderArtistDetail()}
           {view === 'SETTINGS' && renderSettings()}
         </div>
       </div>
@@ -815,7 +932,7 @@ export default function App() {
 
 // ... NavBtn, MobileNavBtn, SongItem, SongItemMenu components (same as before)
 const NavBtn = ({ icon, label, active, onClick }: any) => (
-  <button onClick={onClick} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${active ? 'bg-white/10 text-white font-medium' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}>
+  <button onClick={onClick} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${active ? 'bg-white/10 text-white font-medium' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}>
     {React.cloneElement(icon, { size: 20 })}
     <span>{label}</span>
   </button>
@@ -838,9 +955,10 @@ interface SongItemProps {
   isLiked: boolean;
   isOpenMenu: boolean;
   setOpenMenu: (id: string | null) => void;
+  onArtistClick: (id: string) => void;
 }
 
-const SongItem: React.FC<SongItemProps> = ({ song, onClick, isCurrent, onToggleLike, onDownload, onPlayNext, isLiked, isOpenMenu, setOpenMenu }) => (
+const SongItem: React.FC<SongItemProps> = ({ song, onClick, isCurrent, onToggleLike, onDownload, onPlayNext, isLiked, isOpenMenu, setOpenMenu, onArtistClick }) => (
   <div onClick={onClick} className={`group flex items-center p-3 rounded-xl cursor-pointer transition-colors ${isCurrent ? 'bg-white/10' : 'hover:bg-white/5'}`}>
     <div className="relative w-12 h-12 rounded-lg overflow-hidden mr-4 flex-shrink-0">
       <img src={song.coverUrl} alt={song.title} className={`w-full h-full object-cover ${song.isGray ? 'grayscale opacity-50' : ''}`} />
@@ -858,7 +976,13 @@ const SongItem: React.FC<SongItemProps> = ({ song, onClick, isCurrent, onToggleL
         {song.source === MusicSource.YOUTUBE && <span className="text-[9px] px-1 rounded bg-gray-800 text-youtube/80">YouTube</span>}
         {song.source === MusicSource.PLUGIN && <span className="text-[9px] px-1 rounded bg-gray-800 text-primary/80">Plugin</span>}
         {song.source === MusicSource.LOCAL && <span className="text-[9px] px-1 rounded bg-gray-600 text-white/80">本地</span>}
-        {song.artist} • {song.album}
+        <span onClick={(e) => {
+            if (song.artistId && onArtistClick) {
+                e.stopPropagation();
+                onArtistClick(song.artistId);
+            }
+        }} className={song.artistId ? "hover:underline hover:text-white cursor-pointer" : ""}>{song.artist}</span> 
+        <span>• {song.album}</span>
       </p>
     </div>
     <div className="flex items-center gap-2 ml-2" onClick={e => e.stopPropagation()}>
@@ -866,13 +990,13 @@ const SongItem: React.FC<SongItemProps> = ({ song, onClick, isCurrent, onToggleL
              <button onClick={() => setOpenMenu(isOpenMenu ? null : song.id)} className="p-2 text-gray-400 hover:text-white rounded-full hover:bg-white/10">
                  <MoreVerticalIcon size={18} />
              </button>
-             <SongItemMenu song={song} isLiked={isLiked} onToggleLike={onToggleLike} onDownload={onDownload} onPlayNext={onPlayNext} isOpen={isOpenMenu} setOpen={(v) => setOpenMenu(v ? song.id : null)} />
+             <SongItemMenu song={song} isLiked={isLiked} onToggleLike={onToggleLike} onDownload={onDownload} onPlayNext={onPlayNext} isOpen={isOpenMenu} setOpen={(v) => setOpenMenu(v ? song.id : null)} onArtistClick={onArtistClick} />
          </div>
     </div>
   </div>
 );
 
-const SongItemMenu = ({ song, isLiked, onToggleLike, onDownload, onPlayNext, isOpen, setOpen }: any) => {
+const SongItemMenu = ({ song, isLiked, onToggleLike, onDownload, onPlayNext, isOpen, setOpen, onArtistClick }: any) => {
     if (!isOpen) return null;
     return (
         <div className="absolute right-0 top-10 w-40 bg-dark-light border border-white/10 rounded-xl shadow-2xl z-50 overflow-hidden animate-fade-in">
@@ -885,6 +1009,11 @@ const SongItemMenu = ({ song, isLiked, onToggleLike, onDownload, onPlayNext, isO
             <button onClick={() => { onDownload(); setOpen(false); }} className="w-full text-left px-4 py-3 text-xs hover:bg-white/10 flex items-center gap-2 text-white">
                 <DownloadIcon size={14} /> 下载 (跳转)
             </button>
+            {song.artistId && (
+                <button onClick={() => { onArtistClick(song.artistId); setOpen(false); }} className="w-full text-left px-4 py-3 text-xs hover:bg-white/10 flex items-center gap-2 text-white">
+                    <UserCheckIcon size={14} /> 查看歌手
+                </button>
+            )}
         </div>
     );
 };

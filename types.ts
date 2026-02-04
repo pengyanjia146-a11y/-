@@ -10,14 +10,24 @@ export interface Song {
   id: string;
   title: string;
   artist: string;
+  artistId?: string; // New: Link to artist detail
   album: string;
   coverUrl: string;
   source: MusicSource;
   duration: number; // in seconds
   audioUrl?: string; 
+  mvId?: string; // New: If present, song has a video
   isGray?: boolean;
   fee?: number; // 0: free, 1: VIP, 8: SQ
   lyric?: string; // LRC format string
+}
+
+export interface Artist {
+  id: string;
+  name: string;
+  coverUrl: string;
+  description?: string;
+  songSize?: number;
 }
 
 export interface Playlist {
@@ -48,6 +58,6 @@ export interface MusicPlugin {
     srcUrl?: string; // Where it was loaded from
 }
 
-export type ViewState = 'HOME' | 'SEARCH' | 'LIBRARY' | 'LABS' | 'SETTINGS';
+export type ViewState = 'HOME' | 'SEARCH' | 'LIBRARY' | 'LABS' | 'SETTINGS' | 'ARTIST_DETAIL';
 
 export type AudioQuality = 'standard' | 'exhigh' | 'lossless';

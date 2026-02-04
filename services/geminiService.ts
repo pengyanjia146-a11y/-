@@ -1,11 +1,12 @@
 import { CapacitorHttp } from '@capacitor/core';
-import { Song, MusicSource, AudioQuality } from "../types";
+import { Song, MusicSource, AudioQuality, Artist } from "../types";
 
 // Define a richer return type for playback details
 interface SongPlayDetails {
     url: string;
     lyric?: string;
     coverUrl?: string; // Update cover if higher quality found
+    isMv?: boolean;
 }
 
 export class ClientSideService {
@@ -32,12 +33,19 @@ export class ClientSideService {
   
   private plugins: any[] = [];
   
+  // Configurable timeout (default 15s)
+  private requestTimeout = 15000;
+  
   // Guest Identity
   private guestCookie = '';
 
   constructor() {
     this.currentInvInstance = this.invidiousInstances[Math.floor(Math.random() * this.invidiousInstances.length)];
     this.generateGuestHeaders();
+  }
+  
+  setSearchTimeout(ms: number) {
+      this.requestTimeout = ms;
   }
   
   // Generate random Hex string
@@ -96,7 +104,8 @@ export class ClientSideService {
       try {
           await CapacitorHttp.get({ 
               url: 'https://music.163.com/api/search/hot', 
-              headers: this.getHeaders() 
+              headers: this.getHeaders(),
+              connectTimeout: 5000 // Ping should be fast
           });
           netease = Date.now() - start;
       } catch (e) { netease = -1; }
@@ -104,7 +113,7 @@ export class ClientSideService {
       const ytStart = Date.now();
       const targetYt = this.customInvInstance || this.currentInvInstance;
       try {
-           await CapacitorHttp.get({ url: `${targetYt}/api/v1/stats`, connectTimeout: 3000 });
+           await CapacitorHttp.get({ url: `${targetYt}/api/v1/stats`, connectTimeout: 5000 });
            youtube = Date.now() - ytStart;
       } catch (e) { 
            youtube = -1; 
@@ -148,36 +157,57 @@ export class ClientSideService {
   getPlugins() { return this.plugins; }
   removePlugin(id: string) { this.plugins = this.plugins.filter(p => p.id !== id); }
 
-  // --- Playlist Import Logic ---
+  // --- Artist & Playlist Import Logic ---
   async importNeteasePlaylist(playlistId: string): Promise<Song[]> {
       try {
-          // Use the Detail API which often contains trackIds
           const url = `https://music.163.com/api/v3/playlist/detail?id=${playlistId}&n=1000&s=8`;
           const response = await CapacitorHttp.get({
               url: url,
-              headers: this.getHeaders()
+              headers: this.getHeaders(),
+              connectTimeout: this.requestTimeout
           });
 
           let data = response.data;
           if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e) {} }
 
           if (data && data.playlist && data.playlist.tracks) {
-              return data.playlist.tracks.map((item: any) => ({
-                  id: String(item.id),
-                  title: item.name,
-                  artist: item.ar ? item.ar.map((a: any) => a.name).join('/') : 'Unknown',
-                  album: item.al ? item.al.name : '',
-                  coverUrl: item.al?.picUrl ? item.al.picUrl.replace(/^http:/, 'https:') : '',
-                  source: MusicSource.NETEASE,
-                  duration: Math.floor(item.dt / 1000),
-                  isGray: false,
-                  fee: item.fee
-              }));
+              return data.playlist.tracks.map((item: any) => this.mapNeteaseSong(item));
           }
       } catch (e) {
           console.error("Playlist Import Error", e);
       }
       return [];
+  }
+
+  async getArtistDetail(artistId: string): Promise<{artist: Artist, songs: Song[]}> {
+      try {
+          const url = `https://music.163.com/api/artist/top/song?id=${artistId}`;
+          const response = await CapacitorHttp.get({
+              url: url,
+              headers: this.getHeaders(),
+              connectTimeout: this.requestTimeout
+          });
+
+          let data = response.data;
+          if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e) {} }
+
+          if (data && data.code === 200) {
+              const artistData = data.artist || {};
+              const artist: Artist = {
+                  id: String(artistData.id || artistId),
+                  name: artistData.name || 'Unknown',
+                  coverUrl: artistData.picUrl ? artistData.picUrl.replace(/^http:/, 'https:') : '',
+                  description: artistData.briefDesc,
+                  songSize: artistData.musicSize
+              };
+
+              const songs = (data.songs || []).map((item: any) => this.mapNeteaseSong(item));
+              return { artist, songs };
+          }
+      } catch (e) {
+          console.error("Artist Detail Error", e);
+      }
+      return { artist: { id: artistId, name: 'Unknown', coverUrl: '' }, songs: [] };
   }
 
   // --- Search Logic ---
@@ -214,6 +244,22 @@ export class ClientSideService {
       return [];
   }
 
+  private mapNeteaseSong(item: any): Song {
+      return {
+          id: String(item.id),
+          title: item.name,
+          artist: item.ar ? item.ar.map((a: any) => a.name).join('/') : (item.artists ? item.artists.map((a: any) => a.name).join('/') : 'Unknown'),
+          artistId: item.ar ? String(item.ar[0].id) : (item.artists ? String(item.artists[0].id) : undefined),
+          album: item.al ? item.al.name : (item.album ? item.album.name : ''),
+          coverUrl: item.al?.picUrl ? item.al.picUrl.replace(/^http:/, 'https:') : (item.album?.picUrl ? item.album.picUrl.replace(/^http:/, 'https:') : ''),
+          source: MusicSource.NETEASE,
+          duration: Math.floor(item.dt / 1000),
+          isGray: false,
+          fee: item.fee,
+          mvId: item.mv ? String(item.mv) : undefined
+      };
+  }
+
   private async searchNetease(keyword: string): Promise<Song[]> {
       try {
           let url = 'https://music.163.com/api/cloudsearch/pc';
@@ -222,24 +268,15 @@ export class ClientSideService {
           const response = await CapacitorHttp.post({
               url: url,
               headers: this.getHeaders(),
-              data: data
+              data: data,
+              connectTimeout: this.requestTimeout
           });
 
           let resData = response.data;
           if (typeof resData === 'string') { try { resData = JSON.parse(resData); } catch(e) {} }
 
           if (resData?.result?.songs) {
-              return resData.result.songs.map((item: any) => ({
-                  id: String(item.id),
-                  title: item.name,
-                  artist: item.ar ? item.ar.map((a: any) => a.name).join('/') : (item.artists ? item.artists.map((a: any) => a.name).join('/') : 'Unknown'),
-                  album: item.al ? item.al.name : (item.album ? item.album.name : ''),
-                  coverUrl: item.al?.picUrl ? item.al.picUrl.replace(/^http:/, 'https:') : (item.album?.picUrl ? item.album.picUrl.replace(/^http:/, 'https:') : ''),
-                  source: MusicSource.NETEASE,
-                  duration: Math.floor(item.dt / 1000),
-                  isGray: false,
-                  fee: item.fee
-              }));
+              return resData.result.songs.map((item: any) => this.mapNeteaseSong(item));
           }
       } catch (e) { console.error("Netease Search Error", e); }
       return [];
@@ -249,8 +286,8 @@ export class ClientSideService {
       const targetHost = this.customInvInstance || this.currentInvInstance;
       try {
           const url = `${targetHost}/api/v1/search?q=${encodeURIComponent(keyword)}&type=video`;
-          // Increased timeout to 20s as requested to reduce failures
-          const response = await CapacitorHttp.get({ url, connectTimeout: 20000 });
+          // Use configured timeout
+          const response = await CapacitorHttp.get({ url, connectTimeout: this.requestTimeout });
 
           if (response.status === 200 && Array.isArray(response.data)) {
               return response.data.slice(0, 5).map((item: any) => ({
@@ -261,7 +298,8 @@ export class ClientSideService {
                   coverUrl: item.videoThumbnails?.[0]?.url || `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`,
                   source: MusicSource.YOUTUBE,
                   duration: item.lengthSeconds,
-                  isGray: false
+                  isGray: false,
+                  mvId: item.videoId
               }));
           }
       } catch (e) {
@@ -276,8 +314,8 @@ export class ClientSideService {
   }
 
   // --- Audio Details Logic ---
-  
   async getSongDetails(song: Song, quality: AudioQuality = 'standard'): Promise<SongPlayDetails> {
+      // Logic same as before...
       if (song.source === MusicSource.NETEASE) {
           return this.getNeteaseDetails(song, quality);
       } else if (song.source === MusicSource.YOUTUBE) {
@@ -294,8 +332,8 @@ export class ClientSideService {
       }
       return { url: '' };
   }
-
-  // Keeping this for reference, though new download uses window.open
+  
+  // ... rest of existing methods (downloadSongBlob, getRealAudioUrl, getMvUrl)
   async downloadSongBlob(url: string): Promise<Blob | null> {
     try {
         const response = await CapacitorHttp.get({
@@ -303,13 +341,8 @@ export class ClientSideService {
             responseType: 'blob',
             headers: this.baseHeaders
         });
-        
-        if (response.status === 200 && response.data) {
-            return response.data;
-        }
-    } catch (e) {
-        console.error("Download Blob Failed", e);
-    }
+        if (response.status === 200 && response.data) return response.data;
+    } catch (e) { console.error("Download Blob Failed", e); }
     return null;
   }
 
@@ -318,10 +351,33 @@ export class ClientSideService {
       return details.url;
   }
 
+  async getMvUrl(song: Song): Promise<string | null> {
+      if (song.source === MusicSource.YOUTUBE) {
+           return this.getYouTubeUrl(song.id);
+      } else if (song.source === MusicSource.NETEASE && song.mvId) {
+          try {
+              const url = `https://music.163.com/api/mv/detail?id=${song.mvId}&type=mp4`;
+              const response = await CapacitorHttp.get({
+                  url: url,
+                  headers: this.getHeaders(),
+                  connectTimeout: this.requestTimeout
+              });
+              let data = response.data;
+              if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e) {} }
+              if (data && data.data && data.data.brs) {
+                  const brs = data.data.brs;
+                  const keys = Object.keys(brs).sort((a,b) => Number(b) - Number(a));
+                  if (keys.length > 0) return brs[keys[0]];
+              }
+          } catch(e) {}
+      }
+      return null;
+  }
+
   private async getNeteaseDetails(song: Song, quality: AudioQuality): Promise<SongPlayDetails> {
+       // ... existing implementation
       let playUrl = '';
       let lyric = '';
-      
       try {
            const id = song.id;
            let br = 128000;
@@ -335,9 +391,10 @@ export class ClientSideService {
            const response = await CapacitorHttp.post({
                url: urlApi,
                headers: this.getHeaders(),
-               data: data
+               data: data,
+               connectTimeout: this.requestTimeout
            });
-
+           // ... parsing logic
            let resData = response.data;
            if (typeof resData === 'string') { try { resData = JSON.parse(resData); } catch(e) {} }
            const songData = resData?.data?.[0];
@@ -348,19 +405,16 @@ export class ClientSideService {
                }
                playUrl = songData.url.replace(/^http:/, 'https:');
            }
-
+           
            const lyricApi = `https://music.163.com/api/song/lyric?id=${id}&lv=1&kv=1&tv=-1`;
            const lyricRes = await CapacitorHttp.get({
                url: lyricApi,
                headers: this.getHeaders()
            });
-           
+           // ... lyric parsing
            let lyricData = lyricRes.data;
            if (typeof lyricData === 'string') { try { lyricData = JSON.parse(lyricData); } catch(e) {} }
-           if (lyricData?.lrc?.lyric) {
-               lyric = lyricData.lrc.lyric;
-           }
-
+           if (lyricData?.lrc?.lyric) lyric = lyricData.lrc.lyric;
       } catch (e: any) { 
           if (e.message === "VIP_REQUIRED") throw e;
           console.error("Netease Detail Fetch failed", e); 
@@ -370,25 +424,23 @@ export class ClientSideService {
 
   private async getYouTubeUrl(id: string): Promise<string> {
       const targetHost = this.customInvInstance || this.currentInvInstance;
-      return `${targetHost}/latest_version?id=${id}&itag=140&local=true`;
+      return `${targetHost}/latest_version?id=${id}&itag=18&local=true`;
   }
-
-  // --- Login ---
+  
+  // ... rest of login methods
   async getUserStatus(cookieInput: string): Promise<any> { 
       try {
           let finalCookie = cookieInput.trim();
           const musicUMatch = cookieInput.match(/MUSIC_U=([0-9a-zA-Z]+)/);
-          if (musicUMatch) {
-              finalCookie = musicUMatch[1]; 
-          } else if (cookieInput.length > 50 && !cookieInput.includes('=')) {
-              finalCookie = cookieInput;
-          }
+          if (musicUMatch) finalCookie = musicUMatch[1]; 
+          else if (cookieInput.length > 50 && !cookieInput.includes('=')) finalCookie = cookieInput;
 
           const testHeader = `os=pc; appver=2.9.7; MUSIC_U=${finalCookie};`;
 
           const response = await CapacitorHttp.post({
               url: 'https://music.163.com/api/w/nuser/account/get',
-              headers: { ...this.baseHeaders, 'Cookie': testHeader }
+              headers: { ...this.baseHeaders, 'Cookie': testHeader },
+              connectTimeout: 8000
           });
           
           let resData = response.data;
@@ -397,11 +449,8 @@ export class ClientSideService {
           if (resData && resData.code === 200) {
               resData._cleanedCookie = finalCookie;
           }
-          
           return resData;
-      } catch(e) {
-          return { code: 500 };
-      }
+      } catch(e) { return { code: 500 }; }
   }
 
   async getLoginKey(): Promise<any> { return { code: 500 }; }
