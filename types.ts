@@ -15,6 +15,7 @@ export interface Song {
   duration: number; // in seconds
   audioUrl?: string; 
   isGray?: boolean;
+  fee?: number; // 0: free, 1: VIP, 8: SQ
   lyric?: string; // LRC format string
 }
 
@@ -33,7 +34,7 @@ export interface UserProfile {
   avatarUrl: string;
   isVip: boolean;
   platform: 'netease' | 'guest';
-  cookie?: string; // Store session cookie
+  cookie?: string; // Store session cookie (MUSIC_U value)
 }
 
 export interface MusicPlugin {
@@ -43,6 +44,7 @@ export interface MusicPlugin {
     author: string;
     sources: string[]; // e.g., ['kugou', 'bilibili']
     status: 'active' | 'disabled';
+    srcUrl?: string; // Where it was loaded from
 }
 
 export type ViewState = 'HOME' | 'SEARCH' | 'LIBRARY' | 'LABS' | 'SETTINGS';

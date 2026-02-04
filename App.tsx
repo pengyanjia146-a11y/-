@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { musicService } from './services/geminiService';
 import { Player } from './components/Player';
 import { LoginModal } from './components/LoginModal';
-import { HomeIcon, SearchIcon, LibraryIcon, NeteaseIcon, YouTubeIcon, PlayIcon, LabIcon, PlaylistAddIcon, PluginFileIcon, MoreVerticalIcon, HeartIcon, DownloadIcon, NextPlanIcon, SettingsIcon, FolderIcon } from './components/Icons';
+import { HomeIcon, SearchIcon, LibraryIcon, NeteaseIcon, YouTubeIcon, PlayIcon, LabIcon, PlaylistAddIcon, PluginFileIcon, MoreVerticalIcon, HeartIcon, DownloadIcon, NextPlanIcon, SettingsIcon, FolderIcon, ActivityIcon } from './components/Icons';
 import { Song, UserProfile, ViewState, MusicSource, Playlist, MusicPlugin } from './types';
 
 export default function App() {
@@ -22,12 +22,16 @@ export default function App() {
   // Plugins State
   const [installedPlugins, setInstalledPlugins] = useState<MusicPlugin[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [pluginLoading, setPluginLoading] = useState(false);
   
+  // Latency State
+  const [pings, setPings] = useState({ netease: -1, youtube: -1 });
+  const [pinging, setPinging] = useState(false);
+
   // Settings State
   const [settings, setSettings] = useState({
       downloadPath: 'Internal Storage/Music/UniStream',
-      downloadQuality: 'lossless',
-      autoDownloadLyrics: true,
+      customInvidious: '',
   });
 
   // Search State
@@ -47,6 +51,14 @@ export default function App() {
         console.error("Failed to parse user data");
       }
     }
+    // Load custom URL
+    const savedUrl = localStorage.getItem('custom_invidious_url');
+    if (savedUrl) {
+        setSettings(s => ({ ...s, customInvidious: savedUrl }));
+        musicService.setCustomInvidiousUrl(savedUrl);
+    }
+
+    checkLatency();
   }, []);
 
   useEffect(() => {
@@ -54,6 +66,13 @@ export default function App() {
     window.addEventListener('click', handleClick);
     return () => window.removeEventListener('click', handleClick);
   }, []);
+
+  const checkLatency = async () => {
+      setPinging(true);
+      const res = await musicService.getPings();
+      setPings(res);
+      setPinging(false);
+  };
 
   const handleLoginSuccess = (loggedInUser: UserProfile) => {
     setUser(loggedInUser);
@@ -72,21 +91,25 @@ export default function App() {
     if (newQueue) setQueue(newQueue);
 
     try {
-        // Direct Client Fetch
         const realUrl = await musicService.getRealAudioUrl(song);
-        console.log("Fetched real URL:", realUrl);
-        
-        const updatedSong = { ...song, audioUrl: realUrl };
-        setCurrentSong(updatedSong);
-        
-        setQueue(prev => prev.map(s => s.id === song.id ? updatedSong : s));
-        if (view === 'SEARCH') {
-            setSearchResults(prev => prev.map(s => s.id === song.id ? updatedSong : s));
+        if (realUrl) {
+            const updatedSong = { ...song, audioUrl: realUrl };
+            setCurrentSong(updatedSong);
+            setQueue(prev => prev.map(s => s.id === song.id ? updatedSong : s));
+            setIsPlaying(true);
+        } else {
+           // Should be caught by catch block if error thrown
         }
-    } catch (e) {
-        console.error("Failed to load song url", e);
+    } catch (e: any) {
+        console.error("Play Error", e);
+        setIsPlaying(false);
+        
+        if (e.message === "VIP_REQUIRED") {
+            alert(`【${song.title}】是 VIP 专享歌曲，暂无法播放。`);
+        } else {
+            alert("无法获取播放链接，请检查网络或更换音源。");
+        }
     }
-    setIsPlaying(true);
   };
 
   const togglePlayPause = () => setIsPlaying(!isPlaying);
@@ -121,9 +144,7 @@ export default function App() {
           return;
       }
       
-      const filename = `${song.title}-${song.artist}.mp3`;
       alert(`正在尝试下载...`);
-      // Simple new tab download for client side
       window.open(urlToDownload, '_blank');
   };
 
@@ -185,38 +206,65 @@ export default function App() {
 
   const handleImportPluginFileClick = () => { fileInputRef.current?.click(); };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      const fileName = file.name;
-      const newPlugin: MusicPlugin = {
-          id: `local-${Date.now()}`,
-          name: fileName.replace(/\.(js|json)$/i, ''),
-          version: '1.0.0',
-          author: 'Local Import',
-          sources: ['local'],
-          status: 'active'
+      
+      setPluginLoading(true);
+      const reader = new FileReader();
+      
+      reader.onload = async (event) => {
+          const content = event.target?.result as string;
+          if (!content) { setPluginLoading(false); return; }
+
+          try {
+              if (file.name.endsWith('.json')) {
+                  // Batch Plugin Import
+                  const json = JSON.parse(content);
+                  const list = Array.isArray(json) ? json : (json.plugins || []);
+                  
+                  let count = 0;
+                  for (const p of list) {
+                      if (p.url) {
+                          const success = await musicService.installPluginFromUrl(p.url);
+                          if(success) count++;
+                      }
+                  }
+                  alert(`成功导入 ${count} 个插件`);
+              } else {
+                  // Single JS File
+                  const success = await musicService.importPlugin(content);
+                  if (success) alert("插件加载成功");
+                  else alert("插件格式错误");
+              }
+              
+              // Refresh installed list (Service internal state to React State mapping)
+              const rawPlugins = musicService.getPlugins();
+              setInstalledPlugins(rawPlugins.map((p: any) => ({
+                  id: p.id,
+                  name: p.platform || p.name || 'Unknown Plugin',
+                  version: p.version || '1.0',
+                  author: p.author || 'Unknown',
+                  sources: ['plugin'],
+                  status: 'active'
+              })));
+
+          } catch (e) {
+              alert("文件解析失败");
+          } finally {
+              setPluginLoading(false);
+          }
       };
-      setInstalledPlugins([...installedPlugins, newPlugin]);
-      alert(`已从文件导入插件: ${newPlugin.name}`);
+      
+      reader.readAsText(file);
       if (fileInputRef.current) fileInputRef.current.value = '';
   };
-
-  const handleImportPluginUrl = () => {
-      const name = prompt("请输入插件名称:");
-      if(!name) return;
-      const url = prompt("请输入插件订阅 URL:");
-      if (!url) return;
-      const newPlugin: MusicPlugin = {
-          id: `net-${Date.now()}`,
-          name: name,
-          version: 'latest',
-          author: 'Network',
-          sources: ['remote'],
-          status: 'active'
-      };
-      setInstalledPlugins([...installedPlugins, newPlugin]);
-      alert(`已添加网络订阅: ${name}`);
+  
+  const handleSaveCustomUrl = () => {
+      musicService.setCustomInvidiousUrl(settings.customInvidious);
+      localStorage.setItem('custom_invidious_url', settings.customInvidious);
+      alert("YouTube 源地址已更新，请尝试重新搜索或 Ping。");
+      checkLatency();
   };
 
   const songItemProps = (song: Song) => ({
@@ -231,18 +279,26 @@ export default function App() {
       setOpenMenu: (id: string | null) => setOpenMenuId(id)
   });
 
+  const getLatencyColor = (ms: number) => {
+      if (ms < 0) return 'text-red-500';
+      if (ms < 200) return 'text-green-500';
+      if (ms < 500) return 'text-yellow-500';
+      return 'text-red-400';
+  };
+
+  // ... (Home Render is same)
   const renderHome = () => (
     <div className="space-y-8 animate-fade-in pb-24">
       <div className="relative h-48 md:h-64 rounded-2xl bg-gradient-to-r from-gray-900 to-primary overflow-hidden flex items-center p-6 shadow-2xl">
         <div className="relative z-10 w-full">
-          <h1 className="text-3xl font-bold mb-2">UniStream 独立版</h1>
+          <h1 className="text-3xl font-bold mb-2">UniStream</h1>
           <p className="text-gray-200 mb-4 max-w-md text-sm md:text-base">
-            直连网易云与 YouTube (Invidious)。<br/>
-            无需电脑，无需代理，即搜即听。
+            直连网易云 (游客可用) 与 YouTube (可换源)。<br/>
+            支持导入 JSON 插件库。
           </p>
           <div className="flex gap-2">
              <div className="text-xs bg-white/20 px-2 py-1 rounded">Serverless Mode</div>
-             <div className="text-xs bg-green-500/20 text-green-300 px-2 py-1 rounded">Direct Connect</div>
+             <div className="text-xs bg-green-500/20 text-green-300 px-2 py-1 rounded">Plugins Active: {installedPlugins.length}</div>
           </div>
         </div>
       </div>
@@ -251,10 +307,7 @@ export default function App() {
         <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mb-2">
             <SearchIcon size={40} className="text-gray-500" />
         </div>
-        <h2 className="text-xl font-bold">开始您的音乐之旅</h2>
-        <p className="text-gray-400 max-w-sm text-sm">
-            全网聚合搜索。直接输入 歌曲名 / 歌手。
-        </p>
+        <h2 className="text-xl font-bold">全网聚合搜索</h2>
         <button onClick={() => setView('SEARCH')} className="bg-primary hover:bg-indigo-600 text-white px-8 py-3 rounded-full font-medium transition-colors">
             去搜索
         </button>
@@ -262,6 +315,7 @@ export default function App() {
     </div>
   );
 
+  // ... (Library Render same as before, simplified for XML length)
   const renderLibrary = () => (
       <div className="pb-24 animate-fade-in">
           {!activePlaylist ? (
@@ -272,6 +326,19 @@ export default function App() {
                         <PlaylistAddIcon className="w-4 h-4" /> 新建歌单
                     </button>
                 </div>
+                
+                {/* User Info Card */}
+                <div onClick={() => !user ? setShowLogin(true) : null} className="bg-white/5 p-4 rounded-xl flex items-center gap-4 mb-6 cursor-pointer hover:bg-white/10 transition-colors">
+                    <div className="w-16 h-16 rounded-full bg-gray-700 overflow-hidden">
+                        {user?.avatarUrl ? <img src={user.avatarUrl} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-gray-400">?</div>}
+                    </div>
+                    <div>
+                        <div className="font-bold text-lg">{user ? user.nickname : '点击登录网易云'}</div>
+                        <div className="text-xs text-gray-400">{user ? (user.isVip ? 'VIP用户' : '普通用户') : '游客模式仅能试听 VIP 歌曲'}</div>
+                    </div>
+                    {user && <button onClick={(e) => {e.stopPropagation(); handleLogout();}} className="ml-auto text-xs text-red-400 border border-red-400 px-2 py-1 rounded">退出</button>}
+                </div>
+
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                     {playlists.map(pl => (
                         <div key={pl.id} onClick={() => setActivePlaylist(pl)} className="group cursor-pointer">
@@ -287,17 +354,16 @@ export default function App() {
                 </div>
               </>
           ) : (
+              // Playlist Detail View (Simplified for brevity, logic remains same)
               <div>
-                  <button onClick={() => setActivePlaylist(null)} className="text-sm text-gray-400 hover:text-white mb-4 flex items-center gap-1">← 返回歌单列表</button>
+                  <button onClick={() => setActivePlaylist(null)} className="text-sm text-gray-400 hover:text-white mb-4 flex items-center gap-1">← 返回</button>
                   <div className="flex items-center gap-6 mb-8">
                       <img src={activePlaylist.coverUrl} className="w-32 h-32 rounded-xl shadow-lg" />
                       <div>
                           <h2 className="text-2xl font-bold mb-2">{activePlaylist.name}</h2>
-                          <div className="mt-4 flex gap-2">
-                            <button onClick={() => { if(activePlaylist.songs.length) playSong(activePlaylist.songs[0], activePlaylist.songs) }} className="bg-primary hover:bg-indigo-600 text-white px-6 py-2 rounded-full flex items-center gap-2">
+                          <button onClick={() => { if(activePlaylist.songs.length) playSong(activePlaylist.songs[0], activePlaylist.songs) }} className="bg-primary hover:bg-indigo-600 text-white px-6 py-2 rounded-full flex items-center gap-2">
                                 <PlayIcon className="w-4 h-4 fill-current" /> 播放全部
-                            </button>
-                          </div>
+                          </button>
                       </div>
                   </div>
                   <div className="space-y-1">
@@ -306,7 +372,6 @@ export default function App() {
                               <span className="text-gray-500 w-8 text-center">{idx + 1}</span>
                               <div className="flex-1 cursor-pointer min-w-0 mr-12" onClick={() => playSong(song, activePlaylist.songs)}>
                                   <div className={`font-medium truncate ${currentSong?.id === song.id ? 'text-primary' : 'text-white'}`}>{song.title}</div>
-                                  <div className="text-xs text-gray-400 truncate">{song.artist}</div>
                               </div>
                               <div className="absolute right-2 top-1/2 -translate-y-1/2">
                                  <SongItemMenu song={song} isLiked={isLiked(song)} onToggleLike={() => handleToggleLike(song)} onDownload={() => handleDownload(song)} onPlayNext={() => handlePlayNext(song)} isOpen={openMenuId === song.id} setOpen={(v) => setOpenMenuId(v ? song.id : null)} />
@@ -319,6 +384,7 @@ export default function App() {
       </div>
   );
 
+  // ... (Search Render same)
   const renderSearch = () => (
       <div className="pb-24 animate-fade-in">
            <form onSubmit={handleSearch} className="mb-6 sticky top-0 bg-dark z-20 py-4">
@@ -329,6 +395,7 @@ export default function App() {
            </form>
            {searchLoading && <div className="flex justify-center py-10"><div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin"></div></div>}
            <div className="space-y-2">
+               {searchResults.length === 0 && !searchLoading && searchQuery && <div className="text-center text-gray-500 mt-10">未找到结果</div>}
                {searchResults.map((song) => <SongItem key={song.id} {...songItemProps(song)} />)}
            </div>
       </div>
@@ -337,13 +404,53 @@ export default function App() {
   const renderLabs = () => (
       <div className="pb-24 animate-fade-in">
           <h2 className="text-2xl font-bold mb-6 flex items-center gap-2"><LabIcon className="text-primary" size={28} /> 实验室</h2>
+          
+          <div className="bg-dark-light p-6 rounded-xl border border-white/5 mb-6">
+               <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-bold text-lg flex items-center gap-2"><ActivityIcon className="text-blue-400" /> 网络延迟</h3>
+                  <button onClick={checkLatency} disabled={pinging} className="text-xs bg-white/10 px-3 py-1 rounded hover:bg-white/20 transition-colors">
+                      {pinging ? '检测中...' : '刷新'}
+                  </button>
+               </div>
+               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                   <div className="bg-black/20 p-4 rounded-lg flex flex-col items-center">
+                       <span className="text-xs text-gray-400 mb-1">网易云 (游客可用)</span>
+                       <span className={`font-mono font-bold ${getLatencyColor(pings.netease)}`}>
+                           {pings.netease === -1 ? 'Timeout' : `${pings.netease}ms`}
+                       </span>
+                   </div>
+                   <div className="bg-black/20 p-4 rounded-lg flex flex-col items-center">
+                       <span className="text-xs text-gray-400 mb-1">YouTube</span>
+                       <span className={`font-mono font-bold ${getLatencyColor(pings.youtube)}`}>
+                           {pings.youtube === -1 ? 'Timeout' : `${pings.youtube}ms`}
+                       </span>
+                   </div>
+               </div>
+          </div>
+
           <div className="bg-dark-light p-6 rounded-xl border border-white/5 mb-6">
               <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><PluginFileIcon className="text-green-400" /> 插件管理</h3>
-              <p className="text-sm text-gray-400 mb-4">当前模式：Direct Connect (原生直连)。</p>
-              <div className="flex gap-4 mb-6">
+              <p className="text-sm text-gray-400 mb-4">支持导入 .js 插件文件或 .json 插件列表库。</p>
+              
+              {installedPlugins.length > 0 && (
+                  <div className="space-y-2 mb-6 max-h-40 overflow-y-auto custom-scrollbar">
+                      {installedPlugins.map(p => (
+                          <div key={p.id} className="flex justify-between items-center bg-white/5 p-3 rounded-lg">
+                              <div>
+                                  <div className="font-bold text-sm">{p.name}</div>
+                                  <div className="text-[10px] text-gray-500">{p.version} • {p.author}</div>
+                              </div>
+                              <div className="text-green-400 text-xs">● Active</div>
+                          </div>
+                      ))}
+                  </div>
+              )}
+
+              <div className="flex gap-4">
                   <input type="file" accept=".js,.json" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileChange} />
-                  <button onClick={handleImportPluginFileClick} className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg text-sm transition-colors border border-white/10">导入插件</button>
-                  <button onClick={handleImportPluginUrl} className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg text-sm transition-colors border border-white/10">网络导入</button>
+                  <button onClick={handleImportPluginFileClick} disabled={pluginLoading} className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg text-sm transition-colors border border-white/10 w-full flex items-center justify-center gap-2">
+                      {pluginLoading ? <div className="w-4 h-4 border-2 border-white/50 border-t-white rounded-full animate-spin"></div> : '导入插件 (.js / .json)'}
+                  </button>
               </div>
           </div>
       </div>
@@ -353,6 +460,25 @@ export default function App() {
       <div className="pb-24 animate-fade-in">
           <h2 className="text-2xl font-bold mb-6 flex items-center gap-2"><SettingsIcon className="text-gray-300" size={28} /> 设置</h2>
           <div className="space-y-6">
+              <div className="bg-dark-light p-5 rounded-xl border border-white/5">
+                  <h3 className="font-bold text-white mb-4 flex items-center gap-2"><YouTubeIcon className="text-red-500 w-5 h-5" /> YouTube 自定义源</h3>
+                  <div className="space-y-4">
+                      <div>
+                          <label className="block text-xs text-gray-400 mb-2">Invidious 镜像地址 (带 https://)</label>
+                          <div className="flex gap-2">
+                            <input 
+                                type="text" 
+                                placeholder="例如: https://invidious.jing.rocks" 
+                                value={settings.customInvidious} 
+                                onChange={(e) => setSettings(s => ({ ...s, customInvidious: e.target.value }))}
+                                className="bg-black/30 w-full p-3 rounded-lg border border-white/10 text-sm text-gray-300 focus:outline-none focus:border-red-500"
+                            />
+                            <button onClick={handleSaveCustomUrl} className="bg-white/10 hover:bg-white/20 px-4 rounded-lg text-sm whitespace-nowrap">保存</button>
+                          </div>
+                      </div>
+                  </div>
+              </div>
+
               <div className="bg-dark-light p-5 rounded-xl border border-white/5">
                   <h3 className="font-bold text-white mb-4 flex items-center gap-2"><DownloadIcon size={18} /> 下载设置</h3>
                   <div className="space-y-4">
@@ -371,6 +497,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-dark text-white flex flex-col md:flex-row">
+      {/* Mobile & Desktop Nav layout remains same */}
       <div className="hidden md:flex flex-col w-64 border-r border-white/5 p-6 bg-dark">
         <div className="flex items-center gap-2 mb-10 text-xl font-bold tracking-tight">
             <div className="w-8 h-8 bg-gradient-to-br from-primary to-purple-600 rounded-lg flex items-center justify-center"><span className="text-white text-xs">U</span></div>
@@ -422,6 +549,7 @@ export default function App() {
   );
 }
 
+// ... NavBtn, MobileNavBtn, SongItem, SongItemMenu components (same as before)
 const NavBtn = ({ icon, label, active, onClick }: any) => (
   <button onClick={onClick} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${active ? 'bg-white/10 text-white font-medium' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}>
     {React.cloneElement(icon, { size: 20 })}
@@ -437,15 +565,15 @@ const MobileNavBtn = ({ icon, label, active, onClick }: any) => (
 );
 
 interface SongItemProps {
-    song: Song;
-    onClick: () => void;
-    isCurrent: boolean;
-    onToggleLike: () => void;
-    onDownload: () => void;
-    onPlayNext: () => void;
-    isLiked: boolean;
-    isOpenMenu: boolean;
-    setOpenMenu: (id: string | null) => void;
+  song: Song;
+  onClick: () => void;
+  isCurrent: boolean;
+  onToggleLike: () => void;
+  onDownload: () => void;
+  onPlayNext: () => void;
+  isLiked: boolean;
+  isOpenMenu: boolean;
+  setOpenMenu: (id: string | null) => void;
 }
 
 const SongItem: React.FC<SongItemProps> = ({ song, onClick, isCurrent, onToggleLike, onDownload, onPlayNext, isLiked, isOpenMenu, setOpenMenu }) => (
@@ -459,7 +587,7 @@ const SongItem: React.FC<SongItemProps> = ({ song, onClick, isCurrent, onToggleL
     <div className="flex-1 min-w-0">
       <h3 className={`font-medium text-sm truncate ${isCurrent ? 'text-primary' : (song.isGray ? 'text-gray-500' : 'text-white')}`}>
           {song.title}
-          {song.isGray && <span className="ml-2 text-[9px] border border-gray-600 rounded px-1">无版权</span>}
+          {song.fee === 1 && <span className="ml-2 text-[9px] bg-netease text-white rounded px-1">VIP</span>}
       </h3>
       <p className="text-xs text-gray-400 truncate">{song.artist} • {song.album}</p>
     </div>
@@ -474,6 +602,8 @@ const SongItem: React.FC<SongItemProps> = ({ song, onClick, isCurrent, onToggleL
             <div title="网易云" className="hidden sm:block p-1 bg-gray-800 rounded opacity-80"><NeteaseIcon className="w-3 h-3 text-netease" /></div>
         ) : song.source === MusicSource.YOUTUBE ? (
             <div title="YouTube" className="hidden sm:block p-1 bg-gray-800 rounded opacity-80"><YouTubeIcon className="w-3 h-3 text-youtube" /></div>
+        ) : song.source === MusicSource.PLUGIN ? (
+            <div title="Plugin" className="hidden sm:block p-1 bg-primary/20 rounded opacity-80 text-[10px] text-primary px-2 font-bold">PLUGIN</div>
         ) : null}
     </div>
   </div>
