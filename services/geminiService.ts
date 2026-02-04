@@ -5,6 +5,7 @@ const getCover = (id: number) => `https://picsum.photos/300/300?random=${id}`;
 const MOCK_LYRICS = `[00:00.00] UniStream Music
 [00:02.00] 后端未连接 / Backend Disconnected
 [00:05.00] 请运行 node server.js 启动后端服务
+[00:08.00] 手机端请确保连接到电脑 IP
 [00:10.00] 当前为本地 Mock 模式`;
 
 const MOCK_AUDIO_POOL = [
@@ -20,21 +21,27 @@ const getMockAudioUrl = (str: string) => {
 
 /**
  * Hybrid Service
- * Tries to connect to localhost:3001 (Real Backend).
+ * Tries to connect to Backend.
  * Falls back to local mock data if fetch fails.
  */
 export class HybridMusicService {
   
+  // 重要：在 Android 真机上，localhost 指向的是手机本身。
+  // 打包 APK 前，请将此处的 IP 更改为您电脑的局域网 IP (例如 192.168.1.5:3001)
   private API_BASE_URL = 'http://localhost:3001/api';
 
   constructor() {
     console.log("Hybrid Music Service Initialized");
   }
+  
+  // 允许在运行时修改 API 地址 (例如从设置页面)
+  setBaseUrl(url: string) {
+      this.API_BASE_URL = url;
+  }
 
   async searchMusic(query: string): Promise<Song[]> {
     try {
-        console.log(`Searching: ${query} via Backend...`);
-        // Attempt to fetch from real backend
+        console.log(`Searching: ${query} via Backend (${this.API_BASE_URL})...`);
         const response = await fetch(`${this.API_BASE_URL}/search?q=${encodeURIComponent(query)}`);
         
         if (!response.ok) throw new Error("Backend Error");
@@ -42,16 +49,11 @@ export class HybridMusicService {
         const data = await response.json();
         
         if (data.songs) {
-             // Enhance backend data with audio URL fetching logic if needed, 
-             // or just map it directly. Here we assume we need to fetch URLs lazily or they are not provided.
-             // For list display, we don't need audio URL yet.
              return data.songs.map((s: any) => ({
                  ...s,
-                 // If backend didn't return cover, use random
                  coverUrl: s.coverUrl || getCover(Math.floor(Math.random() * 100)),
-                 // If backend didn't return audioUrl, we will fetch it when playing
                  audioUrl: s.audioUrl || '', 
-                 lyric: MOCK_LYRICS // Backend integration for lyrics is a future task
+                 lyric: MOCK_LYRICS 
              }));
         }
     } catch (e) {
@@ -65,7 +67,6 @@ export class HybridMusicService {
     ];
   }
 
-  // New method to fetch real audio URL before playing
   async getRealAudioUrl(song: Song): Promise<string> {
       if (song.audioUrl && song.audioUrl.startsWith('http')) return song.audioUrl;
       
@@ -81,9 +82,7 @@ export class HybridMusicService {
       return getMockAudioUrl(song.title);
   }
 
-  // Generate recommendations (Keep mocked for now to save API calls)
   async generateLocalRecommendation(tag: string): Promise<{ name: string; description: string; songs: Song[] }> {
-      // ... same mock logic as before for recommendations ...
       const timestamp = Date.now();
       const songs: Song[] = [];
       const artists = ["周杰伦", "陈奕迅", "林俊杰"];
