@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { UserProfile } from '../types';
 import { NeteaseIcon, QrCodeIcon, SmartphoneIcon, CookieIcon } from './Icons';
+import { musicService } from '../services/geminiService';
 
 interface LoginModalProps {
   onLogin: (user: UserProfile) => void;
@@ -9,54 +10,92 @@ interface LoginModalProps {
 
 export const LoginModal: React.FC<LoginModalProps> = ({ onLogin, onClose }) => {
   const [method, setMethod] = useState<'qr' | 'phone' | 'cookie'>('qr');
-  const [phone, setPhone] = useState('');
-  const [code, setCode] = useState('');
+  const [qrImg, setQrImg] = useState('');
+  const [qrKey, setQrKey] = useState('');
+  const [scanState, setScanState] = useState<'waiting' | 'scanned' | 'success' | 'expired'>('waiting');
   const [cookie, setCookie] = useState('');
   const [loading, setLoading] = useState(false);
-  const [scanState, setScanState] = useState<'waiting' | 'scanned' | 'success'>('waiting');
+  const timerRef = useRef<any>(null);
 
-  // Simulate QR Code polling
-  useEffect(() => {
-    if (method === 'qr') {
-      const timer1 = setTimeout(() => {
-        setScanState('scanned');
-      }, 3000); // 3 seconds to scan
-
-      const timer2 = setTimeout(() => {
-        if(scanState !== 'success') {
-             // Just show scanned state, wait for user confirmation or auto login logic
-             // For demo, we auto login after scanned
-             handleLoginSuccess();
-        }
-      }, 5000); 
-
-      return () => {
-        clearTimeout(timer1);
-        clearTimeout(timer2);
-      };
-    } else {
-        setScanState('waiting');
-    }
-  }, [method]);
-
-  const handleLoginSuccess = () => {
-     setLoading(true);
-     setTimeout(() => {
-      const mockUser: UserProfile = {
-        id: '883921',
-        nickname: '云村村民_99',
-        avatarUrl: 'https://picsum.photos/200',
-        isVip: true,
-        platform: 'netease'
-      };
-      onLogin(mockUser);
-      setLoading(false);
-    }, 800);
+  // Initialize QR Code
+  const initQR = async () => {
+      try {
+          const keyRes = await musicService.getLoginKey();
+          if (keyRes.code === 200) {
+              setQrKey(keyRes.data.unikey);
+              const createRes = await musicService.createLoginQR(keyRes.data.unikey);
+              if (createRes.code === 200) {
+                  setQrImg(createRes.data.qrimg);
+                  setScanState('waiting');
+                  startCheckInterval(keyRes.data.unikey);
+              }
+          }
+      } catch (e) {
+          console.error("QR Init Failed", e);
+      }
   };
 
-  const handleFormLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    handleLoginSuccess();
+  const startCheckInterval = (key: string) => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      
+      timerRef.current = setInterval(async () => {
+          try {
+              const res = await musicService.checkLoginQR(key);
+              // 800: expired, 801: waiting, 802: scanned/confirming, 803: success
+              if (res.code === 800) {
+                  setScanState('expired');
+                  clearInterval(timerRef.current);
+              } else if (res.code === 802) {
+                  setScanState('scanned');
+              } else if (res.code === 803) {
+                  setScanState('success');
+                  clearInterval(timerRef.current);
+                  // Login Success!
+                  const cookie = res.cookie;
+                  await fetchUserProfile(cookie);
+              }
+          } catch (e) {
+              console.error("QR Check Error", e);
+          }
+      }, 3000);
+  };
+
+  const fetchUserProfile = async (cookie: string) => {
+      setLoading(true);
+      try {
+          const res = await musicService.getUserStatus(cookie);
+          if (res.profile) {
+              const user: UserProfile = {
+                  id: String(res.profile.userId),
+                  nickname: res.profile.nickname,
+                  avatarUrl: res.profile.avatarUrl,
+                  isVip: res.profile.vipType > 0,
+                  platform: 'netease',
+                  cookie: cookie // Save cookie for future requests
+              };
+              onLogin(user);
+          }
+      } catch (e) {
+          alert("获取用户信息失败");
+      } finally {
+          setLoading(false);
+      }
+  };
+
+  useEffect(() => {
+    if (method === 'qr') {
+      initQR();
+    } else {
+      if(timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => {
+        if(timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [method]);
+
+  const handleCookieLogin = (e: React.FormEvent) => {
+      e.preventDefault();
+      fetchUserProfile(cookie);
   };
 
   return (
@@ -81,12 +120,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLogin, onClose }) => {
         {method === 'qr' && (
           <div className="flex flex-col items-center animate-fade-in">
             <div className="bg-white p-2 rounded-lg mb-4 relative group cursor-pointer overflow-hidden">
-               {scanState === 'waiting' && (
-                 <img 
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=simulate_netease_login_${Date.now()}`} 
-                    alt="Scan Login" 
-                    className="rounded"
-                 />
+               {scanState === 'waiting' && qrImg && (
+                 <img src={qrImg} alt="Scan Login" className="rounded w-[150px] h-[150px]" />
+               )}
+               {scanState === 'expired' && (
+                   <div className="w-[150px] h-[150px] flex flex-col items-center justify-center bg-white text-black cursor-pointer" onClick={initQR}>
+                       <p className="font-bold">二维码已过期</p>
+                       <p className="text-xs text-gray-500">点击刷新</p>
+                   </div>
                )}
                {scanState === 'scanned' && (
                   <div className="w-[150px] h-[150px] flex flex-col items-center justify-center bg-white">
@@ -94,65 +135,31 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLogin, onClose }) => {
                       <div className="text-gray-500 text-xs mt-2">请在手机上确认登录</div>
                   </div>
                )}
-               {loading && (
-                   <div className="absolute inset-0 bg-white/90 flex items-center justify-center">
+               {scanState === 'success' || loading ? (
+                   <div className="absolute inset-0 bg-white/90 flex items-center justify-center w-[150px] h-[150px] z-10">
                        <div className="w-6 h-6 border-2 border-netease border-t-transparent rounded-full animate-spin"></div>
                    </div>
-               )}
+               ) : null}
             </div>
             <p className="text-xs text-gray-400">请使用网易云音乐APP扫码</p>
           </div>
         )}
 
         {method === 'phone' && (
-          <form onSubmit={handleFormLogin} className="flex flex-col space-y-4 animate-fade-in pt-4">
-            <div className="space-y-2">
-              <input 
-                type="tel" 
-                placeholder="请输入手机号" 
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                className="w-full bg-black/30 border border-white/10 rounded-lg p-3 text-sm focus:border-netease focus:outline-none transition-colors"
-                required
-              />
-              <div className="flex space-x-2">
-                <input 
-                  type="text" 
-                  placeholder="验证码" 
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  className="w-full bg-black/30 border border-white/10 rounded-lg p-3 text-sm focus:border-netease focus:outline-none transition-colors"
-                  required
-                />
-                <button type="button" className="whitespace-nowrap px-3 py-1 text-xs bg-white/10 rounded hover:bg-white/20">
-                  获取验证码
-                </button>
-              </div>
-            </div>
-            
-            <button 
-              type="submit" 
-              disabled={loading}
-              className="w-full bg-netease hover:bg-red-700 text-white font-bold py-3 rounded-lg transition-colors flex items-center justify-center mt-2"
-            >
-              {loading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : "登 录"}
-            </button>
-          </form>
+          <div className="text-center pt-8 text-gray-400 text-sm">
+              暂未开放，请使用扫码登录
+          </div>
         )}
 
         {method === 'cookie' && (
-          <form onSubmit={handleFormLogin} className="flex flex-col space-y-4 animate-fade-in pt-2">
-            <div className="bg-yellow-500/10 border border-yellow-500/20 p-2 rounded text-[10px] text-yellow-200">
-               提示：请粘贴浏览器 Cookie 中的 <code className="bg-black/30 px-1 rounded">MUSIC_U</code> 字段，或使用 Chrome 插件导出的 Token。
-            </div>
+          <form onSubmit={handleCookieLogin} className="flex flex-col space-y-4 animate-fade-in pt-2">
             <textarea 
-              placeholder="粘贴 Cookie / Token..." 
+              placeholder="粘贴 MUSIC_U Cookie..." 
               value={cookie}
               onChange={(e) => setCookie(e.target.value)}
               className="w-full h-24 bg-black/30 border border-white/10 rounded-lg p-3 text-xs focus:border-netease focus:outline-none transition-colors resize-none font-mono"
               required
             />
-            
             <button 
               type="submit" 
               disabled={loading}
@@ -169,11 +176,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLogin, onClose }) => {
                 <QrCodeIcon size={20} />
                 <span className="text-[10px] group-hover:text-gray-300">扫码</span>
             </button>
-            <button title="手机模式" onClick={() => setMethod('phone')} className={`flex flex-col items-center gap-1 group ${method === 'phone' ? 'text-netease' : 'text-gray-500'}`}>
-                <SmartphoneIcon size={20} />
-                <span className="text-[10px] group-hover:text-gray-300">手机</span>
-            </button>
-            <button title="Cookie/插件模式" onClick={() => setMethod('cookie')} className={`flex flex-col items-center gap-1 group ${method === 'cookie' ? 'text-netease' : 'text-gray-500'}`}>
+            <button title="Cookie模式" onClick={() => setMethod('cookie')} className={`flex flex-col items-center gap-1 group ${method === 'cookie' ? 'text-netease' : 'text-gray-500'}`}>
                 <CookieIcon size={20} />
                 <span className="text-[10px] group-hover:text-gray-300">Cookie</span>
             </button>

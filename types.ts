@@ -33,6 +33,7 @@ export interface UserProfile {
   avatarUrl: string;
   isVip: boolean;
   platform: 'netease' | 'guest';
+  cookie?: string; // Store session cookie
 }
 
 export interface MusicPlugin {

@@ -43,6 +43,7 @@ export default function App() {
   
   // Settings State
   const [settings, setSettings] = useState({
+      apiUrl: 'http://localhost:3001/api', // Default for web
       downloadPath: 'Internal Storage/Music/UniStream',
       downloadQuality: 'lossless',
       autoDownloadLyrics: true,
@@ -57,6 +58,7 @@ export default function App() {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   useEffect(() => {
+    // Load User
     const savedUser = localStorage.getItem('unistream_user');
     if (savedUser) {
       try {
@@ -64,6 +66,13 @@ export default function App() {
       } catch (e) {
         console.error("Failed to parse user data");
       }
+    }
+
+    // Load API URL
+    const savedApiUrl = localStorage.getItem('unistream_api_url');
+    if (savedApiUrl) {
+        setSettings(prev => ({ ...prev, apiUrl: savedApiUrl }));
+        musicService.setBaseUrl(savedApiUrl);
     }
   }, []);
 
@@ -83,6 +92,12 @@ export default function App() {
   const handleLogout = () => {
     setUser(null);
     localStorage.removeItem('unistream_user');
+  };
+
+  const updateApiUrl = (url: string) => {
+      setSettings(prev => ({ ...prev, apiUrl: url }));
+      localStorage.setItem('unistream_api_url', url);
+      musicService.setBaseUrl(url);
   };
 
   // UPDATED: Async playSong to fetch real URL
@@ -511,6 +526,26 @@ export default function App() {
           </h2>
 
           <div className="space-y-6">
+              {/* API Settings */}
+              <div className="bg-dark-light p-5 rounded-xl border border-white/5">
+                  <h3 className="font-bold text-white mb-4 flex items-center gap-2">
+                      <SearchIcon size={18} /> 后端连接
+                  </h3>
+                  <div>
+                        <label className="block text-xs text-gray-400 mb-2">后端 API 地址 (手机端请填电脑IP，例如 http://192.168.x.x:3001/api)</label>
+                        <div className="flex items-center gap-2 bg-black/30 p-3 rounded-lg border border-white/10">
+                            <span className="text-gray-500 text-xs">URL</span>
+                            <input 
+                            type="text" 
+                            value={settings.apiUrl}
+                            onChange={(e) => updateApiUrl(e.target.value)}
+                            className="bg-transparent w-full text-sm text-gray-300 focus:outline-none font-mono"
+                            />
+                        </div>
+                        <p className="text-[10px] text-gray-500 mt-2">修改后立即生效。请确保手机与电脑在同一 Wi-Fi 下。</p>
+                    </div>
+              </div>
+
               {/* Download Settings */}
               <div className="bg-dark-light p-5 rounded-xl border border-white/5">
                   <h3 className="font-bold text-white mb-4 flex items-center gap-2">
