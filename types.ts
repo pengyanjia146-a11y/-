@@ -1,3 +1,4 @@
+
 export enum MusicSource {
   NETEASE = 'NETEASE',
   YOUTUBE = 'YOUTUBE',
@@ -48,3 +49,5 @@ export interface MusicPlugin {
 }
 
 export type ViewState = 'HOME' | 'SEARCH' | 'LIBRARY' | 'LABS' | 'SETTINGS';
+
+export type AudioQuality = 'standard' | 'exhigh' | 'lossless';

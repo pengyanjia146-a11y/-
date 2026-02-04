@@ -1,6 +1,7 @@
+
 import React, { useEffect, useState, useRef } from 'react';
-import { Song, MusicSource } from '../types';
-import { PlayIcon, PauseIcon, SkipForwardIcon, SkipBackIcon, NeteaseIcon, YouTubeIcon, LyricsIcon, CloseIcon, DownloadIcon, HeartIcon, VolumeIcon, VolumeMuteIcon } from './Icons';
+import { Song, MusicSource, AudioQuality } from '../types';
+import { PlayIcon, PauseIcon, SkipForwardIcon, SkipBackIcon, NeteaseIcon, YouTubeIcon, LyricsIcon, CloseIcon, DownloadIcon, HeartIcon, VolumeIcon, VolumeMuteIcon, ChevronDownIcon, ListIcon } from './Icons';
 
 interface PlayerProps {
   currentSong: Song | null;
@@ -11,20 +12,31 @@ interface PlayerProps {
   onToggleLike: (song: Song) => void;
   onDownload: (song: Song) => void;
   isLiked: boolean;
+  quality: AudioQuality;
+  setQuality: (q: AudioQuality) => void;
 }
 
-export const Player: React.FC<PlayerProps> = ({ currentSong, isPlaying, onPlayPause, onNext, onPrev, onToggleLike, onDownload, isLiked }) => {
+export const Player: React.FC<PlayerProps> = ({ currentSong, isPlaying, onPlayPause, onNext, onPrev, onToggleLike, onDownload, isLiked, quality, setQuality }) => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [progress, setProgress] = useState(0);
-  const [showLyrics, setShowLyrics] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  
+  // Fullscreen State
+  const [isFullScreen, setIsFullScreen] = useState(false);
+  const [showLyrics, setShowLyrics] = useState(false);
+  const [lyricsLines, setLyricsLines] = useState<{time: number, text: string}[]>([]);
   const lyricsRef = useRef<HTMLDivElement>(null);
+
+  // Network Speed Simulation
+  const [netSpeed, setNetSpeed] = useState<string>('0 KB/s');
+  const [isBuffering, setIsBuffering] = useState(false);
+
+  // Error State
   const [error, setError] = useState<string | null>(null);
   
   // Volume State
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
-  const [prevVolume, setPrevVolume] = useState(1);
 
   // Background Playback (MediaSession API)
   useEffect(() => {
@@ -50,33 +62,53 @@ export const Player: React.FC<PlayerProps> = ({ currentSong, isPlaying, onPlayPa
     }
   }, [currentSong, onPlayPause, onNext, onPrev]);
 
+  // Handle Song Change
   useEffect(() => {
-    if (currentSong && audioRef.current) {
-        // Reset error on song change
+    if (currentSong) {
         setError(null);
-
-        // Only update src if it's different and valid
-        if (currentSong.audioUrl && audioRef.current.src !== currentSong.audioUrl) {
-            audioRef.current.src = currentSong.audioUrl;
-            // Explicitly load
-            audioRef.current.load();
-        }
-        
-        if (isPlaying && currentSong.audioUrl) {
-            const playPromise = audioRef.current.play();
-            if (playPromise !== undefined) {
-                playPromise.catch(error => {
-                    // Ignore "The play() request was interrupted by a call to pause()" error
-                    if (error.name === 'AbortError') return;
-                    console.error("Playback blocked or interrupted:", error);
-                });
-            }
-        } else {
-            audioRef.current.pause();
-        }
+        setLyricsLines(parseLyrics(currentSong.lyric || ''));
+        // If reusing player, we might not need to force reload src if it hasn't changed, but here we usually do
     }
-  }, [currentSong, isPlaying]);
+  }, [currentSong]);
 
+  // Handle Play/Pause
+  useEffect(() => {
+      if (audioRef.current) {
+          if (isPlaying) {
+              const promise = audioRef.current.play();
+              if (promise) promise.catch(() => {});
+          } else {
+              audioRef.current.pause();
+          }
+      }
+  }, [isPlaying]);
+
+  useEffect(() => {
+    if (audioRef.current && currentSong?.audioUrl) {
+         if (audioRef.current.src !== currentSong.audioUrl) {
+             audioRef.current.src = currentSong.audioUrl;
+             if(isPlaying) audioRef.current.play().catch(()=>{});
+         }
+    }
+  }, [currentSong?.audioUrl]);
+
+
+  // Network Speed Simulation Hook
+  useEffect(() => {
+      let interval: any;
+      if (isBuffering) {
+          interval = setInterval(() => {
+              // Random speed between 200KB/s and 2MB/s just for visuals
+              const speed = Math.floor(Math.random() * (2048 - 200) + 200);
+              setNetSpeed(speed > 1024 ? `${(speed/1024).toFixed(1)} MB/s` : `${speed} KB/s`);
+          }, 800);
+      } else {
+          setNetSpeed('');
+      }
+      return () => clearInterval(interval);
+  }, [isBuffering]);
+
+  // Volume
   useEffect(() => {
     if (audioRef.current) {
         audioRef.current.volume = isMuted ? 0 : volume;
@@ -92,43 +124,28 @@ export const Player: React.FC<PlayerProps> = ({ currentSong, isPlaying, onPlayPa
     }
   };
 
-  const handleEnded = () => {
-      onNext();
-  };
-  
-  const handleError = (e: any) => {
-      console.error("Audio Error Event:", e);
-      if (audioRef.current?.error) {
-           console.error("Media Error Code:", audioRef.current.error.code);
-           
-           let msg = "播放失败";
-           // Android specific tips
-           if (audioRef.current.error.code === 4) msg = "资源无效 (请切换网络或稍后重试)";
-           if (audioRef.current.error.code === 3) msg = "解码错误";
-           if (audioRef.current.error.code === 2) msg = "网络错误";
-           
-           setError(msg);
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (audioRef.current) {
+          const seekTime = (parseFloat(e.target.value) / 100) * audioRef.current.duration;
+          audioRef.current.currentTime = seekTime;
+          setProgress(parseFloat(e.target.value));
       }
   };
 
-  const toggleMute = () => {
-      if (isMuted) {
-          setIsMuted(false);
-          setVolume(prevVolume);
-      } else {
-          setPrevVolume(volume);
-          setIsMuted(true);
-          setVolume(0);
+  // Lyrics Auto-Scroll
+  const activeLyricIndex = lyricsLines.findIndex((l, i) => {
+      return currentTime >= l.time && (i === lyricsLines.length - 1 || currentTime < lyricsLines[i+1].time);
+  });
+
+  useEffect(() => {
+      if (isFullScreen && showLyrics && lyricsRef.current && activeLyricIndex !== -1) {
+          const activeEl = lyricsRef.current.children[activeLyricIndex] as HTMLElement;
+          if (activeEl) {
+             activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
       }
-  };
+  }, [activeLyricIndex, showLyrics, isFullScreen]);
 
-  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const val = parseFloat(e.target.value);
-      setVolume(val);
-      setIsMuted(val === 0);
-  };
-
-  // Simple Lyrics Parser
   const parseLyrics = (lrc: string) => {
       if (!lrc) return [];
       const lines = lrc.split('\n');
@@ -148,148 +165,155 @@ export const Player: React.FC<PlayerProps> = ({ currentSong, isPlaying, onPlayPa
       return result;
   };
 
-  const currentLyrics = currentSong?.lyric ? parseLyrics(currentSong.lyric) : [];
-  
-  const activeLyricIndex = currentLyrics.findIndex((l, i) => {
-      return currentTime >= l.time && (i === currentLyrics.length - 1 || currentTime < currentLyrics[i+1].time);
-  });
-
-  useEffect(() => {
-      if (showLyrics && lyricsRef.current && activeLyricIndex !== -1) {
-          const activeEl = lyricsRef.current.children[activeLyricIndex] as HTMLElement;
-          if (activeEl) {
-             activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
-      }
-  }, [activeLyricIndex, showLyrics]);
-
+  const formatTime = (seconds: number) => {
+      if (isNaN(seconds)) return "00:00";
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  };
 
   if (!currentSong) return null;
 
   return (
     <>
-      {showLyrics && (
-        <div className="fixed inset-0 z-[60] bg-dark/95 backdrop-blur-2xl flex flex-col items-center animate-fade-in">
-            <button onClick={() => setShowLyrics(false)} className="absolute top-6 right-6 text-gray-400 hover:text-white p-2">
-                <CloseIcon size={32} />
-            </button>
-            
-            <div className="mt-20 mb-8 flex flex-col items-center">
-                <img src={currentSong.coverUrl} className="w-48 h-48 rounded-2xl shadow-2xl mb-6" />
-                <h2 className="text-2xl font-bold text-white mb-2">{currentSong.title}</h2>
-                <p className="text-gray-400">{currentSong.artist}</p>
-                {error && <p className="text-red-400 mt-4 border border-red-500/30 bg-red-900/20 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">⚠️ {error}</p>}
-            </div>
+      {/* Full Screen Player Overlay */}
+      <div className={`fixed inset-0 z-[60] bg-dark flex flex-col transition-transform duration-500 ease-in-out ${isFullScreen ? 'translate-y-0' : 'translate-y-full'}`}>
+          {/* Backdrop Blur */}
+          <div className="absolute inset-0 z-0">
+             <img src={currentSong.coverUrl} className="w-full h-full object-cover blur-3xl opacity-40 brightness-50" />
+             <div className="absolute inset-0 bg-black/30" />
+          </div>
 
-            <div ref={lyricsRef} className="flex-1 w-full max-w-lg overflow-y-auto px-6 pb-32 text-center no-scrollbar mask-image-gradient">
-                {currentLyrics.length > 0 ? currentLyrics.map((line, idx) => (
-                    <p 
-                        key={idx} 
-                        className={`py-4 transition-all duration-300 ${idx === activeLyricIndex ? 'text-white text-xl font-bold scale-110' : 'text-gray-500 text-sm'}`}
-                    >
-                        {line.text}
-                    </p>
-                )) : (
-                    <p className="text-gray-500 mt-20">暂无歌词</p>
-                )}
-            </div>
-        </div>
-      )}
+          {/* Header */}
+          <div className="relative z-10 flex items-center justify-between px-4 pt-12 pb-4">
+              <button onClick={() => setIsFullScreen(false)} className="text-white p-2">
+                  <ChevronDownIcon size={30} />
+              </button>
+              <div className="flex flex-col items-center">
+                  <span className="text-white text-lg font-bold truncate max-w-[200px]">{currentSong.title}</span>
+                  <span className="text-gray-300 text-xs">{currentSong.artist}</span>
+              </div>
+              <button className="p-2 opacity-0"><ChevronDownIcon /></button> {/* Placeholder */}
+          </div>
 
-      <div className="fixed md:bottom-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] left-0 right-0 bg-dark/95 backdrop-blur-xl border-t border-white/10 px-4 py-3 z-50">
+          {/* Middle Content: Vinyl or Lyrics */}
+          <div 
+             className="relative z-10 flex-1 flex flex-col items-center justify-center w-full overflow-hidden" 
+             onClick={() => setShowLyrics(!showLyrics)}
+          >
+             {showLyrics ? (
+                // Lyrics View
+                <div ref={lyricsRef} className="w-full h-full overflow-y-auto px-8 text-center no-scrollbar mask-image-gradient py-10">
+                     {lyricsLines.length > 0 ? lyricsLines.map((line, idx) => (
+                         <p key={idx} className={`py-3 transition-all duration-300 ${idx === activeLyricIndex ? 'text-white text-xl font-bold' : 'text-gray-400 text-sm'}`}>
+                             {line.text}
+                         </p>
+                     )) : <p className="text-gray-500 mt-20">暂无歌词</p>}
+                </div>
+             ) : (
+                // Vinyl View
+                <div className={`relative w-[70vw] h-[70vw] max-w-[350px] max-h-[350px] rounded-full border-8 border-black/80 shadow-2xl overflow-hidden ${isPlaying ? 'animate-[spin_20s_linear_infinite]' : ''}`} style={{ animationPlayState: isPlaying ? 'running' : 'paused' }}>
+                    <img src={currentSong.coverUrl} className="w-full h-full object-cover" />
+                    <div className="absolute inset-0 rounded-full border-[10px] border-black/10"></div>
+                </div>
+             )}
+          </div>
+
+          {/* Bottom Controls */}
+          <div className="relative z-10 pb-12 px-6 bg-gradient-to-t from-black/80 to-transparent">
+               
+               {/* Metadata & Actions */}
+               <div className="flex justify-between items-center mb-6 px-4">
+                   <div className="flex flex-col">
+                       <span className="text-2xl font-bold text-white mb-1 line-clamp-1">{currentSong.title}</span>
+                       <span className="text-gray-400 text-sm">{currentSong.artist}</span>
+                   </div>
+                   <button onClick={(e) => { e.stopPropagation(); onToggleLike(currentSong); }}>
+                        <HeartIcon size={28} fill={isLiked ? "#dd001b" : "none"} className={isLiked ? "text-netease" : "text-white"} />
+                   </button>
+               </div>
+
+               {/* Progress Bar & Time */}
+               <div className="mb-2">
+                   <div className="flex items-center justify-between text-xs text-gray-400 font-mono mb-2">
+                        <span>{formatTime(currentTime)}</span>
+                        {isBuffering && <span className="text-primary animate-pulse text-[10px]">{netSpeed}</span>}
+                        <span>{formatTime(currentSong.duration)}</span>
+                   </div>
+                   <input 
+                      type="range" 
+                      min="0" 
+                      max="100" 
+                      step="0.1"
+                      value={progress}
+                      onChange={handleSeek}
+                      className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full"
+                   />
+               </div>
+
+               {/* Quality & Controls */}
+               <div className="flex justify-center items-center gap-2 mb-6">
+                   {(['standard', 'exhigh', 'lossless'] as AudioQuality[]).map(q => (
+                       <button 
+                         key={q} 
+                         onClick={(e) => { e.stopPropagation(); setQuality(q); }}
+                         className={`text-[10px] px-2 py-1 rounded border ${quality === q ? 'bg-white text-black border-white' : 'text-gray-400 border-gray-600'}`}
+                       >
+                           {q === 'standard' ? '标准' : (q === 'exhigh' ? '极高' : '无损')}
+                       </button>
+                   ))}
+               </div>
+
+               <div className="flex items-center justify-around">
+                   <button className="text-gray-300 hover:text-white"><ListIcon size={24} /></button>
+                   <button onClick={(e) => {e.stopPropagation(); onPrev();}} className="text-white hover:opacity-80"><SkipBackIcon size={32} /></button>
+                   <button onClick={(e) => {e.stopPropagation(); onPlayPause();}} className="w-16 h-16 rounded-full bg-white text-black flex items-center justify-center hover:scale-105 transition-transform active:scale-95">
+                        {isPlaying ? <PauseIcon size={32} fill="black" /> : <PlayIcon size={32} fill="black" />}
+                   </button>
+                   <button onClick={(e) => {e.stopPropagation(); onNext();}} className="text-white hover:opacity-80"><SkipForwardIcon size={32} /></button>
+                   <button onClick={(e) => {e.stopPropagation(); onDownload(currentSong);}} className="text-gray-300 hover:text-white"><DownloadIcon size={24} /></button>
+               </div>
+          </div>
+      </div>
+
+      {/* Mini Player Bar (Bottom) */}
+      <div className={`fixed md:bottom-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] left-0 right-0 bg-dark/95 backdrop-blur-xl border-t border-white/10 px-4 py-2 z-50 cursor-pointer ${isFullScreen ? 'invisible' : 'visible'}`} onClick={() => setIsFullScreen(true)}>
         <audio 
           ref={audioRef} 
           onTimeUpdate={handleTimeUpdate} 
-          onEnded={handleEnded}
-          onError={handleError}
+          onEnded={onNext}
+          onWaiting={() => setIsBuffering(true)}
+          onPlaying={() => setIsBuffering(false)}
+          onError={(e) => { console.error(e); setError('Load Error'); }}
           preload="auto"
           crossOrigin="anonymous" 
         />
         
-        <div className="absolute top-0 left-0 right-0 h-1 bg-white/10 cursor-pointer group">
-          <div 
-              className="h-full bg-gradient-to-r from-netease to-primary relative" 
-              style={{ width: `${progress}%` }}
-          >
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow opacity-0 group-hover:opacity-100 transition-opacity"></div>
-          </div>
+        {/* Mini Progress */}
+        <div className="absolute top-0 left-0 right-0 h-0.5 bg-white/10">
+            <div className="h-full bg-netease" style={{ width: `${progress}%` }}></div>
         </div>
 
-        <div className="flex items-center justify-between max-w-7xl mx-auto h-14">
-          <div className="flex items-center flex-1 min-w-0 mr-4 gap-3">
-            <img 
-              src={currentSong.coverUrl} 
-              alt={currentSong.title} 
-              onClick={() => setShowLyrics(!showLyrics)}
-              className={`w-12 h-12 rounded-lg object-cover shadow-lg cursor-pointer hover:opacity-80 transition-opacity ${isPlaying ? 'animate-pulse-slow' : ''}`}
-            />
-            <div className="flex flex-col min-w-0 justify-center">
-              <h4 className="text-white font-medium text-sm truncate flex items-center gap-2">
-                  {currentSong.title}
-                  <span className="text-[9px] px-1.5 py-0.5 rounded border border-white/10 text-gray-400 font-normal hidden sm:inline-block">
-                      {currentSong.source === MusicSource.NETEASE ? 'SQ' : (currentSong.source === MusicSource.PLUGIN ? 'FLAC' : 'HQ')}
-                  </span>
-              </h4>
-              <div className="flex items-center text-xs text-gray-400 mt-1">
-                  <span className="truncate max-w-[100px]">{currentSong.artist}</span>
-                  <span className="mx-2 text-gray-600">|</span>
-                  {currentSong.source === MusicSource.NETEASE && <NeteaseIcon className="w-3 h-3 text-netease mr-1" />}
-                  {currentSong.source === MusicSource.YOUTUBE && <YouTubeIcon className="w-3 h-3 text-youtube mr-1" />}
-                  {currentSong.source === MusicSource.PLUGIN && <span className="text-primary font-bold">Plugin</span>}
-                  <span className="ml-1 scale-90">{currentSong.source}</span>
-                  {error && <span className="ml-2 text-red-400 font-bold text-[10px] border border-red-500 rounded px-1">ERR</span>}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center space-x-2 md:space-x-4">
-             <button onClick={() => onDownload(currentSong)} className="hidden md:block text-gray-400 hover:text-white transition-colors" title="下载">
-                <DownloadIcon size={20} />
-             </button>
-             
-             <button onClick={() => onToggleLike(currentSong)} className={`hidden md:block transition-colors ${isLiked ? 'text-netease' : 'text-gray-400 hover:text-white'}`} title="收藏">
-                <HeartIcon size={20} fill={isLiked ? "currentColor" : "none"} />
-             </button>
-
-             <button onClick={() => setShowLyrics(!showLyrics)} className={`hidden md:block hover:text-white transition-colors ${showLyrics ? 'text-primary' : 'text-gray-400'}`} title="歌词">
-                <LyricsIcon size={20} />
-             </button>
-
-            <div className="w-px h-6 bg-white/10 hidden md:block mx-2"></div>
-
-            <button onClick={onPrev} className="text-gray-300 hover:text-white transition-colors">
-              <SkipBackIcon size={24} />
-            </button>
-            
-            <button 
-              onClick={onPlayPause}
-              className="w-12 h-12 bg-white text-black rounded-full flex items-center justify-center hover:scale-105 transition-transform active:scale-95 shadow-xl shadow-white/10"
-            >
-              {isPlaying ? <PauseIcon size={24} fill="black" /> : <PlayIcon size={24} fill="black" />}
-            </button>
-
-            <button onClick={onNext} className="text-gray-300 hover:text-white transition-colors">
-              <SkipForwardIcon size={24} />
-            </button>
-
-             <div className="hidden lg:flex items-center group relative w-24">
-                <button onClick={toggleMute} className="text-gray-400 hover:text-white mr-2">
-                    {isMuted || volume === 0 ? <VolumeMuteIcon size={20} /> : <VolumeIcon size={20} />}
-                </button>
-                <div className="flex-1 h-1 bg-white/20 rounded-full cursor-pointer relative overflow-hidden">
-                     <div className="absolute inset-y-0 left-0 bg-white rounded-full" style={{ width: `${isMuted ? 0 : volume * 100}%` }}></div>
-                     <input 
-                        type="range" 
-                        min="0" 
-                        max="1" 
-                        step="0.05" 
-                        value={isMuted ? 0 : volume} 
-                        onChange={handleVolumeChange}
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                     />
+        <div className="flex items-center justify-between max-w-7xl mx-auto h-12">
+            <div className="flex items-center flex-1 min-w-0 mr-4 gap-3">
+                <img 
+                    src={currentSong.coverUrl} 
+                    className={`w-10 h-10 rounded-full object-cover shadow-lg border border-white/10 ${isPlaying ? 'animate-[spin_10s_linear_infinite]' : ''}`} 
+                />
+                <div className="flex flex-col min-w-0">
+                    <h4 className="text-white font-medium text-sm truncate">{currentSong.title}</h4>
+                    <p className="text-gray-400 text-xs truncate">{currentSong.artist}</p>
                 </div>
-             </div>
-          </div>
+            </div>
+
+            <div className="flex items-center gap-4">
+                <button onClick={(e) => {e.stopPropagation(); onPlayPause();}} className="w-9 h-9 border border-white/30 rounded-full flex items-center justify-center text-white">
+                    {isPlaying ? <PauseIcon size={16} fill="white" /> : <PlayIcon size={16} fill="white" />}
+                </button>
+                <button onClick={(e) => {e.stopPropagation(); setIsFullScreen(true);}} className="text-gray-400">
+                    <ListIcon size={20} />
+                </button>
+            </div>
         </div>
       </div>
     </>
