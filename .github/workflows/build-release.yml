@@ -1,15 +1,15 @@
-name: Build Release APK
+name: Build Debug APK (Test)
 
 on:
   push:
-    branches: [ main, master ]
+    branches:
+      - main
+      - master
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
 
     steps:
       - uses: actions/checkout@v4
@@ -28,40 +28,58 @@ jobs:
       - name: Install Dependencies
         run: npm install
 
-      - name: Build Web Assets
-        # 🟢 确保先生成静态文件目录
-        run: npm run build
+      # 🟢 修复 TS6305 报错：临时创建一个只包含 src 的 tsconfig
+      # 这样 build 就不会因为它去检查 vite.config.ts 而报错了
+      - name: Fix TS Config & Build
+        run: |
+          echo '{
+            "compilerOptions": {
+              "target": "ES2020",
+              "useDefineForClassFields": true,
+              "lib": ["ES2020", "DOM", "DOM.Iterable"],
+              "module": "ESNext",
+              "skipLibCheck": true,
+              "moduleResolution": "bundler",
+              "allowImportingTsExtensions": true,
+              "resolveJsonModule": true,
+              "isolatedModules": true,
+              "noEmit": true,
+              "jsx": "react-jsx",
+              "strict": true,
+              "noUnusedLocals": false,
+              "noUnusedParameters": false,
+              "noFallthroughCasesInSwitch": true
+            },
+            "include": ["src"],
+            "exclude": ["node_modules", "dist", "vite.config.ts", "server.js"]
+          }' > tsconfig.json
+          
+          # 开始构建网页
+          npm run build
 
       - name: Setup Capacitor
         run: |
           npm install @capacitor/core @capacitor/cli @capacitor/android
-          # 如果没有 android 目录则添加
+          
+          # 自动创建安卓工程
           if [ ! -d "android" ]; then
             npx cap add android
           fi
-          # 🟢 关键：强制将 dist 资源拷贝进安卓工程
+          
+          # 同步资源
           npx cap copy android
           npx cap sync android
 
-      - name: Decode Keystore (Optional)
-        if: env.KEYSTORE_BASE64 != ''
-        run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/release.keystore
-          echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}" > android/keystore.properties
-          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/keystore.properties
-          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/keystore.properties
-          echo "storeFile=release.keystore" >> android/keystore.properties
-
-      - name: Build Android Release
+      - name: Build Debug APK
         run: |
           cd android
           chmod +x gradlew
-          # 即使签名失败，也要尝试生成 Release APK
-          ./gradlew assembleRelease
+          # 🟢 关键：构建 Debug 包（自带签名，可直接安装）
+          ./gradlew assembleDebug
 
-      - name: Upload APK
+      - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: UniStream-Release-Package
-          # 🟢 导出所有生成的 APK，方便排查是哪个包能用
-          path: android/app/build/outputs/apk/release/*.apk
+          name: UniStream-Debug-Installable
+          # 导出 Debug 包
+          path: android/app/build/outputs/apk/debug/*.apk
