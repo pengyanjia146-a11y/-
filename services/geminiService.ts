@@ -1,17 +1,13 @@
 import { CapacitorHttp } from '@capacitor/core';
 import { Song, MusicSource, AudioQuality } from "../types";
 
-// Define a richer return type for playback details
 interface SongPlayDetails {
     url: string;
     lyric?: string;
-    coverUrl?: string; // Update cover if higher quality found
 }
 
 export class ClientSideService {
 
-  // Privacy: Removed Hardcoded Cookies.
-  // Privacy: We generate random NMTID and DeviceID for guests to mimic real traffic.
   private baseHeaders = {
     'Referer': 'https://music.163.com/',
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -29,10 +25,7 @@ export class ClientSideService {
   ];
   private currentInvInstance = this.invidiousInstances[0];
   private customInvInstance = '';
-  
   private plugins: any[] = [];
-  
-  // Guest Identity
   private guestCookie = '';
 
   constructor() {
@@ -40,7 +33,6 @@ export class ClientSideService {
     this.generateGuestHeaders();
   }
   
-  // Generate random Hex string
   private randomHex(length: number) {
       let result = '';
       const characters = '0123456789abcdef';
@@ -51,7 +43,6 @@ export class ClientSideService {
   }
 
   private generateGuestHeaders() {
-      // Mimic NMTID and DeviceId for better guest access rates
       const nmtid = this.randomHex(32);
       const deviceId = this.randomHex(16);
       this.guestCookie = `os=pc; appver=2.9.7; NMTID=${nmtid}; DeviceId=${deviceId};`;
@@ -61,16 +52,16 @@ export class ClientSideService {
       this.customInvInstance = url ? url.replace(/\/$/, '') : '';
   }
 
-  // --- 智能 Headers 构造 ---
   private getHeaders() {
       const savedUser = localStorage.getItem('unistream_user');
-      let cookieStr = this.guestCookie; // Default to guest
+      let cookieStr = this.guestCookie; 
 
       if (savedUser) {
           try {
               const userData = JSON.parse(savedUser);
               if (userData.cookie && userData.cookie.length > 5) {
                   let targetCookie = userData.cookie;
+                  // 智能合并用户 Cookie
                   if (targetCookie.includes('MUSIC_U=')) {
                        if (!targetCookie.includes('os=pc')) cookieStr = `os=pc; appver=2.9.7; ${targetCookie}`;
                        else cookieStr = targetCookie; 
@@ -87,7 +78,6 @@ export class ClientSideService {
       };
   }
 
-  // --- Latency / Ping Test ---
   async getPings(): Promise<{ netease: number; youtube: number }> {
       const start = Date.now();
       let netease = -1;
@@ -113,7 +103,6 @@ export class ClientSideService {
       return { netease, youtube };
   }
 
-  // --- Plugin Management ---
   async installPluginFromUrl(url: string): Promise<boolean> {
       try {
           const response = await CapacitorHttp.get({ url });
@@ -148,7 +137,6 @@ export class ClientSideService {
   getPlugins() { return this.plugins; }
   removePlugin(id: string) { this.plugins = this.plugins.filter(p => p.id !== id); }
 
-  // --- Search Logic ---
   async searchMusic(query: string): Promise<Song[]> {
     const promises = [
         this.searchNetease(query),
@@ -241,8 +229,6 @@ export class ClientSideService {
       const idx = this.invidiousInstances.indexOf(this.currentInvInstance);
       this.currentInvInstance = this.invidiousInstances[(idx + 1) % this.invidiousInstances.length];
   }
-
-  // --- Audio Details Logic ---
   
   async getSongDetails(song: Song, quality: AudioQuality = 'standard'): Promise<SongPlayDetails> {
       if (song.source === MusicSource.NETEASE) {
@@ -260,7 +246,6 @@ export class ClientSideService {
       return { url: '' };
   }
 
-  // Helper: Download blob with correct headers (Proxying via CapacitorHttp)
   async downloadSongBlob(url: string): Promise<Blob | null> {
     try {
         const response = await CapacitorHttp.get({
@@ -289,7 +274,6 @@ export class ClientSideService {
       
       try {
            const id = song.id;
-           // Map quality to bitrate
            let br = 128000;
            let level = 'standard';
            if (quality === 'exhigh') { br = 320000; level = 'exhigh'; }
@@ -323,7 +307,6 @@ export class ClientSideService {
            
            let lyricData = lyricRes.data;
            if (typeof lyricData === 'string') { try { lyricData = JSON.parse(lyricData); } catch(e) {} }
-           
            if (lyricData?.lrc?.lyric) {
                lyric = lyricData.lrc.lyric;
            }
@@ -340,7 +323,6 @@ export class ClientSideService {
       return `${targetHost}/latest_version?id=${id}&itag=140&local=true`;
   }
 
-  // --- Login ---
   async getUserStatus(cookieInput: string): Promise<any> { 
       try {
           let finalCookie = cookieInput.trim();
