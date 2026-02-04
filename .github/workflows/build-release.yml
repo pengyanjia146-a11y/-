@@ -1,7 +1,15 @@
 name: Build Release APK
 
-on:
-  workflow_dispatch:
+on: push
+  # 方案 A: 既支持手动，也支持 PUSH 自动触发
+  workflow_dispatch: 
+  push:
+    branches:
+      - main        # 或者写你的当前分支名，比如 'dev'
+      - master
+
+jobs:
+  # ... 下面内容不变 ...
 
 jobs:
   build:
