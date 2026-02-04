@@ -52,15 +52,18 @@ export const Player: React.FC<PlayerProps> = ({ currentSong, isPlaying, onPlayPa
 
   useEffect(() => {
     if (currentSong && audioRef.current) {
-        if (audioRef.current.src !== currentSong.audioUrl) {
-            audioRef.current.src = currentSong.audioUrl || '';
-            audioRef.current.load();
+        // Only update src if it's different and valid
+        if (currentSong.audioUrl && audioRef.current.src !== currentSong.audioUrl) {
+            audioRef.current.src = currentSong.audioUrl;
+            // No need to call load() explicitly in most modern browsers if src changes
         }
-        if (isPlaying) {
-            // Promise to prevent play interrupted error
+        
+        if (isPlaying && currentSong.audioUrl) {
             const playPromise = audioRef.current.play();
             if (playPromise !== undefined) {
                 playPromise.catch(error => {
+                    // Ignore "The play() request was interrupted by a call to pause()" error
+                    if (error.name === 'AbortError') return;
                     console.error("Playback blocked or interrupted:", error);
                 });
             }
@@ -177,7 +180,7 @@ export const Player: React.FC<PlayerProps> = ({ currentSong, isPlaying, onPlayPa
       )}
 
       {/* Bottom Player */}
-      <div className="fixed bottom-0 left-0 right-0 bg-dark/95 backdrop-blur-xl border-t border-white/10 px-4 py-3 z-50 pb-safe">
+      <div className="fixed md:bottom-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] left-0 right-0 bg-dark/95 backdrop-blur-xl border-t border-white/10 px-4 py-3 z-50">
         <audio 
           ref={audioRef} 
           onTimeUpdate={handleTimeUpdate} 
@@ -272,9 +275,6 @@ export const Player: React.FC<PlayerProps> = ({ currentSong, isPlaying, onPlayPa
              </div>
           </div>
         </div>
-        
-        {/* Safe Area Spacer for Mobile Home Bar */}
-        <div className="h-safe-bottom w-full"></div>
       </div>
     </>
   );
