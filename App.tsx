@@ -1,267 +1,193 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Icons } from './components/Icons';
+import { musicService } from './services/geminiService';
 import { Player } from './components/Player';
-import { Song } from './types';
-import axios from 'axios';
+import { LoginModal } from './components/LoginModal';
+import { Toast, ToastType } from './components/Toast';
+import { Icons } from './components/Icons';
+import { Song, UserProfile, ViewState, MusicSource, Playlist, MusicPlugin, AudioQuality, Artist } from './types';
 
-// 请确保这里是你电脑的局域网 IP (例如 192.168.1.5:3001)
-// 手机无法访问 localhost
-const API_BASE_URL = 'http://localhost:3001'; 
-
-type PlayMode = 'sequence' | 'random' | 'single';
-type SearchSource = 'netease' | 'youtube' | 'bilibili';
-
-function App() {
-  const [activeTab, setActiveTab] = useState<'home' | 'library' | 'user'>('home');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<Song[]>([]);
+export default function App() {
+  const [view, setView] = useState<ViewState>('HOME');
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [showLogin, setShowLogin] = useState(false);
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  
-  // 新功能状态
-  const [playMode, setPlayMode] = useState<PlayMode>('sequence');
-  const [isLoading, setIsLoading] = useState(false);
-  const [searchSource, setSearchSource] = useState<SearchSource>('netease');
+  const [queue, setQueue] = useState<Song[]>([]);
+  const [quality, setQuality] = useState<AudioQuality>('standard');
+  const [activeTab, setActiveTab] = useState<'ALL' | 'NETEASE' | 'BILIBILI' | 'YOUTUBE' | 'PLUGIN'>('ALL');
+  const [toast, setToast] = useState<{msg: string, type: ToastType, show: boolean}>({ msg: '', type: 'info', show: false });
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Song[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [playMode, setPlayMode] = useState<'sequence' | 'random' | 'single'>('sequence');
 
-  const audioRef = useRef<HTMLAudioElement>(null);
+  // Persistence (Simplified for brevity)
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [playHistory, setPlayHistory] = useState<Song[]>([]);
 
-  // --- 播放控制逻辑 ---
+  const showToast = (msg: string, type: ToastType = 'info') => setToast({ msg, type, show: true });
 
-  const handlePlayPause = () => {
-    if (audioRef.current) {
-      if (isPlaying) audioRef.current.pause();
-      else audioRef.current.play();
-      setIsPlaying(!isPlaying);
-    }
-  };
-
-  // 核心：根据模式计算下一首
-  const getNextSongIndex = (current: number, total: number, mode: PlayMode, direction: 'next' | 'prev') => {
-    if (mode === 'random') {
-      return Math.floor(Math.random() * total);
-    }
-    // 顺序模式
-    if (direction === 'next') {
-      return (current + 1) % total;
-    } else {
-      return (current - 1 + total) % total;
-    }
-  };
-
+  const handlePlayPause = () => setIsPlaying(!isPlaying);
   const handleNext = () => {
-    if (!currentSong || searchResults.length === 0) return;
-    const currentIndex = searchResults.findIndex(s => s.id === currentSong.id);
-    const nextIndex = getNextSongIndex(currentIndex, searchResults.length, playMode, 'next');
-    handleSongSelect(searchResults[nextIndex]);
+      // 简单切歌逻辑
+      if(!queue.length) return;
+      const idx = queue.findIndex(s => s.id === currentSong?.id);
+      const nextIdx = (idx + 1) % queue.length;
+      playSong(queue[nextIdx]);
   };
-
   const handlePrev = () => {
-    if (!currentSong || searchResults.length === 0) return;
-    const currentIndex = searchResults.findIndex(s => s.id === currentSong.id);
-    const prevIndex = getNextSongIndex(currentIndex, searchResults.length, playMode, 'prev');
-    handleSongSelect(searchResults[prevIndex]);
+      if(!queue.length) return;
+      const idx = queue.findIndex(s => s.id === currentSong?.id);
+      const prevIdx = (idx - 1 + queue.length) % queue.length;
+      playSong(queue[prevIdx]);
+  };
+  const handleToggleMode = () => {
+      const modes = ['sequence', 'random', 'single'] as const;
+      const next = modes[(modes.indexOf(playMode) + 1) % modes.length];
+      setPlayMode(next);
+      showToast(`播放模式: ${next}`);
   };
 
-  // 自动连播逻辑
-  const handleSongEnd = () => {
-    if (playMode === 'single' && audioRef.current) {
-      audioRef.current.currentTime = 0;
-      audioRef.current.play();
-    } else {
-      handleNext();
-    }
+  const playSong = async (song: Song, newQueue?: Song[]) => {
+      setIsPlaying(false);
+      setCurrentSong(song);
+      if (newQueue) setQueue(newQueue);
+      
+      try {
+          const details = await musicService.getSongDetails(song, quality);
+          if (details.url) {
+              const updated = { ...song, audioUrl: details.url, lyric: details.lyric };
+              setCurrentSong(updated);
+              setIsPlaying(true);
+              setPlayHistory(prev => [updated, ...prev].slice(0, 50));
+          } else {
+              showToast('无法获取播放地址', 'error');
+          }
+      } catch (e) {
+          showToast('播放失败', 'error');
+      }
   };
-
-  const togglePlayMode = () => {
-    const modes: PlayMode[] = ['sequence', 'random', 'single'];
-    const nextMode = modes[(modes.indexOf(playMode) + 1) % modes.length];
-    setPlayMode(nextMode);
-  };
-
-  // --- 搜索与 API ---
 
   const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!searchQuery.trim()) return;
-
-    setIsLoading(true);
-    setSearchResults([]); 
-
-    try {
-      const res = await axios.get(`${API_BASE_URL}/api/search/${searchSource}`, {
-        params: { keyword: searchQuery }
-      });
-      setSearchResults(res.data);
-    } catch (error) {
-      console.error('Search failed:', error);
-      alert('搜索失败，请检查网络或后端代理');
-    } finally {
-      setIsLoading(false);
-    }
+      e.preventDefault();
+      if (!searchQuery.trim()) return;
+      setSearchLoading(true);
+      const res = await musicService.searchMusic(searchQuery);
+      setSearchResults(res);
+      setSearchLoading(false);
   };
 
-  const handleSongSelect = async (song: Song) => {
-    setCurrentSong(song);
-    setIsPlaying(false);
-    
-    try {
-      const res = await axios.get(`${API_BASE_URL}/api/play/${song.source}`, {
-        params: { id: song.id }
-      });
-      
-      if (res.data.url && audioRef.current) {
-        audioRef.current.src = res.data.url;
-        audioRef.current.play();
-        setIsPlaying(true);
-      } else {
-        alert('该资源无法播放');
-      }
-    } catch (error) {
-      console.error('Play failed:', error);
-      alert('播放失败');
-    }
-  };
+  const renderHome = () => (
+      <div className="pb-24 animate-fade-in space-y-6">
+          <div className="bg-gradient-to-r from-gray-900 to-indigo-900 p-6 rounded-2xl shadow-xl">
+              <h1 className="text-3xl font-bold mb-2">UniStream</h1>
+              <p className="text-gray-300">聚合音乐体验</p>
+          </div>
+          {playHistory.length > 0 && (
+              <div>
+                  <h3 className="font-bold mb-3">最近播放</h3>
+                  <div className="flex gap-4 overflow-x-auto no-scrollbar pb-2">
+                      {playHistory.map((s, i) => (
+                          <div key={i} className="w-24 flex-shrink-0 cursor-pointer" onClick={() => playSong(s)}>
+                              <img src={s.cover} className="w-24 h-24 rounded-lg object-cover mb-2" />
+                              <p className="text-xs truncate">{s.title}</p>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+          )}
+      </div>
+  );
+
+  const renderSearch = () => (
+      <div className="pb-24">
+          <form onSubmit={handleSearch} className="sticky top-0 bg-black z-10 py-4">
+              <div className="relative">
+                  <Icons.Search className="absolute left-4 top-3.5 text-gray-400" size={20} />
+                  <input 
+                      type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+                      placeholder="搜索全网音乐..." 
+                      className="w-full bg-gray-900 rounded-xl py-3 pl-12 pr-4 text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+              </div>
+          </form>
+          {searchLoading ? (
+              <div className="flex justify-center py-10"><Icons.Loader className="animate-spin text-indigo-500" size={32} /></div>
+          ) : (
+              <div className="space-y-2">
+                  {searchResults.map(song => (
+                      <div key={song.id} onClick={() => playSong(song, searchResults)} className="flex items-center p-3 rounded-lg hover:bg-white/5 cursor-pointer">
+                          <img src={song.cover} className="w-12 h-12 rounded object-cover mr-3" />
+                          <div className="min-w-0">
+                              <h4 className={`font-medium truncate ${currentSong?.id === song.id ? 'text-indigo-400' : 'text-white'}`}>{song.title}</h4>
+                              <p className="text-xs text-gray-400 truncate">{song.artist} • {song.source}</p>
+                          </div>
+                      </div>
+                  ))}
+              </div>
+          )}
+      </div>
+  );
 
   return (
-    <div className="min-h-screen bg-black text-white font-sans select-none flex flex-col">
+    <div className="min-h-screen bg-black text-white flex flex-col md:flex-row">
+      <Toast message={toast.msg} type={toast.type} isVisible={toast.show} onClose={() => setToast(t => ({...t, show: false}))} />
       
-      {/* 顶部搜索栏 */}
-      <div className="fixed top-0 left-0 right-0 bg-black/90 backdrop-blur z-40 px-4 pt-4 pb-2 border-b border-white/10">
-        <form onSubmit={handleSearch} className="flex gap-2 mb-3">
-          <div className="relative flex-1">
-            <Icons.Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={`搜索 ${searchSource === 'netease' ? '网易云' : searchSource === 'youtube' ? 'YouTube' : 'Bilibili'}`}
-              className="w-full bg-gray-900 border border-gray-800 rounded-full py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:border-purple-500 transition-colors"
-            />
+      {/* Sidebar (Desktop) */}
+      <div className="hidden md:flex flex-col w-64 border-r border-white/10 p-6 bg-black">
+          <div className="text-xl font-bold mb-8 flex items-center gap-2">
+              <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">U</div> UniStream
           </div>
-        </form>
-        
-        {/* 搜索源 Tab */}
-        <div className="flex justify-around text-sm">
-          {(['netease', 'youtube', 'bilibili'] as SearchSource[]).map(source => (
-            <button
-              key={source}
-              onClick={() => setSearchSource(source)}
-              className={`pb-2 px-2 border-b-2 capitalize transition-all ${
-                searchSource === source 
-                  ? 'border-purple-500 text-purple-400 font-medium' 
-                  : 'border-transparent text-gray-500'
-              }`}
-            >
-              {source === 'netease' ? '网易云' : source}
-            </button>
-          ))}
-        </div>
+          <nav className="space-y-2">
+              <NavBtn icon={<Icons.Home />} label="首页" active={view === 'HOME'} onClick={() => setView('HOME')} />
+              <NavBtn icon={<Icons.Search />} label="搜索" active={view === 'SEARCH'} onClick={() => setView('SEARCH')} />
+              <NavBtn icon={<Icons.Library />} label="我的" active={view === 'LIBRARY'} onClick={() => setView('LIBRARY')} />
+              <NavBtn icon={<Icons.Settings />} label="设置" active={view === 'SETTINGS'} onClick={() => setView('SETTINGS')} />
+          </nav>
       </div>
 
-      {/* 主内容区：pt-32 避开顶部，pb-40 避开底部播放器 */}
-      <main className="flex-1 pt-32 pb-40 px-4 overflow-y-auto">
-        
-        {/* 加载状态 (延时界面插件) */}
-        {isLoading && (
-          <div className="flex flex-col items-center justify-center py-20 text-gray-500 animate-pulse">
-            <Icons.Loader className="w-10 h-10 animate-spin mb-4 text-purple-600" />
-            <p>正在搜索全网资源...</p>
-          </div>
-        )}
+      {/* Main Content */}
+      <div className="flex-1 h-screen overflow-y-auto no-scrollbar p-4 md:p-8">
+          {view === 'HOME' && renderHome()}
+          {view === 'SEARCH' && renderSearch()}
+          {view === 'LIBRARY' && <div className="text-center py-20 text-gray-500">我的音乐库 (开发中)</div>}
+          {view === 'SETTINGS' && <div className="text-center py-20 text-gray-500">设置 (开发中)</div>}
+      </div>
 
-        {/* 结果列表 */}
-        {!isLoading && (
-          <div className="space-y-3">
-            {searchResults.map((song) => (
-              <div
-                key={song.id}
-                onClick={() => handleSongSelect(song)}
-                className={`flex items-center p-3 rounded-xl active:scale-[0.98] transition-all ${
-                  currentSong?.id === song.id 
-                    ? 'bg-gradient-to-r from-purple-900/40 to-transparent border border-purple-500/30' 
-                    : 'bg-gray-900/40 border border-transparent'
-                }`}
-              >
-                <div className="relative">
-                  <img 
-                    src={song.cover} 
-                    alt={song.title} 
-                    className="w-14 h-14 rounded-lg object-cover bg-gray-800 shadow-lg"
-                  />
-                  {/* 来源角标 */}
-                  <div className="absolute -bottom-1 -right-1 bg-black/80 text-[10px] px-1.5 rounded border border-gray-700 uppercase text-gray-300">
-                    {song.source === 'netease' ? 'Cloud' : song.source.slice(0, 2)}
-                  </div>
-                </div>
-                
-                <div className="ml-4 flex-1 min-w-0">
-                  <h3 className={`font-medium truncate ${currentSong?.id === song.id ? 'text-purple-400' : 'text-white'}`}>
-                    {song.title}
-                  </h3>
-                  <p className="text-sm text-gray-400 truncate mt-0.5">{song.artist}</p>
-                </div>
-              </div>
-            ))}
-            
-            {!isLoading && searchResults.length === 0 && searchQuery && (
-              <div className="text-center text-gray-600 py-10">
-                未找到相关内容，请尝试切换源
-              </div>
-            )}
-          </div>
-        )}
-      </main>
+      {/* Mobile Nav */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-white/10 flex justify-around py-3 pb-safe z-50">
+          <MobileBtn icon={<Icons.Home />} label="首页" active={view === 'HOME'} onClick={() => setView('HOME')} />
+          <MobileBtn icon={<Icons.Search />} label="搜索" active={view === 'SEARCH'} onClick={() => setView('SEARCH')} />
+          <MobileBtn icon={<Icons.Library />} label="我的" active={view === 'LIBRARY'} onClick={() => setView('LIBRARY')} />
+      </div>
 
-      {/* 底部播放器 (固定在菜单上方: bottom-[64px]) */}
+      {/* Player Bar */}
       {currentSong && (
-        <Player
-          currentSong={currentSong}
-          isPlaying={isPlaying}
-          onPlayPause={handlePlayPause}
-          onNext={handleNext}
-          onPrev={handlePrev}
-          playMode={playMode}
-          onToggleMode={togglePlayMode}
-          className="bottom-16 border-b border-black shadow-2xl" 
-        />
+          <div className="mb-16 md:mb-0">
+             <Player 
+                currentSong={currentSong} isPlaying={isPlaying}
+                onPlayPause={handlePlayPause} onNext={handleNext} onPrev={handlePrev}
+                onToggleLike={() => {}} onDownload={() => {}} isLiked={false}
+                quality={quality} setQuality={setQuality}
+                playMode={playMode} onToggleMode={handleToggleMode}
+                className="bottom-16 md:bottom-0 md:left-64 border-t border-white/10"
+             />
+          </div>
       )}
 
-      {/* 底部导航菜单 */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-black/95 backdrop-blur border-t border-white/5 pb-safe z-50 h-16">
-        <div className="flex justify-around items-center h-full">
-          <button 
-            onClick={() => setActiveTab('home')}
-            className={`flex flex-col items-center gap-1 w-full h-full justify-center ${activeTab === 'home' ? 'text-purple-500' : 'text-gray-600'}`}
-          >
-            <Icons.Home className="w-5 h-5" />
-            <span className="text-[10px]">首页</span>
-          </button>
-          
-          <button 
-            onClick={() => setActiveTab('library')}
-            className={`flex flex-col items-center gap-1 w-full h-full justify-center ${activeTab === 'library' ? 'text-purple-500' : 'text-gray-600'}`}
-          >
-            <Icons.Library className="w-5 h-5" />
-            <span className="text-[10px]">媒体库</span>
-          </button>
-          
-          <button 
-            onClick={() => setActiveTab('user')}
-            className={`flex flex-col items-center gap-1 w-full h-full justify-center ${activeTab === 'user' ? 'text-purple-500' : 'text-gray-600'}`}
-          >
-            <Icons.User className="w-5 h-5" />
-            <span className="text-[10px]">我的</span>
-          </button>
-        </div>
-      </nav>
-
-      <audio 
-        ref={audioRef} 
-        onEnded={handleSongEnd}
-        onError={(e) => console.error("Audio Error", e)}
-      />
+      {showLogin && <LoginModal onLogin={u => { setUser(u); setShowLogin(false); }} onClose={() => setShowLogin(false)} />}
     </div>
   );
 }
 
-export default App;
+const NavBtn = ({ icon, label, active, onClick }: any) => (
+  <button onClick={onClick} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${active ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white'}`}>
+    {React.cloneElement(icon, { size: 20 })} <span>{label}</span>
+  </button>
+);
+
+const MobileBtn = ({ icon, label, active, onClick }: any) => (
+    <button onClick={onClick} className={`flex flex-col items-center space-y-1 ${active ? 'text-white' : 'text-gray-500'}`}>
+        {React.cloneElement(icon, { size: 20 })} <span className="text-[10px]">{label}</span>
+    </button>
+);
