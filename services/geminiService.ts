@@ -1,18 +1,14 @@
 import { CapacitorHttp } from '@capacitor/core';
 import { Song, MusicSource, AudioQuality, Artist, Playlist } from "../types";
 
-// Define a richer return type for playback details
 interface SongPlayDetails {
     url: string;
     lyric?: string;
-    coverUrl?: string; // Update cover if higher quality found
+    cover?: string; // 🟢 修改为 cover
     isMv?: boolean;
 }
 
 export class ClientSideService {
-
-  // Privacy: Removed Hardcoded Cookies.
-  // Privacy: We generate random NMTID and DeviceID for guests to mimic real traffic.
   private baseHeaders = {
     'Referer': 'https://music.163.com/',
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -32,18 +28,11 @@ export class ClientSideService {
       'https://inv.nadeko.net',
       'https://invidious.jing.rocks',
       'https://yt.artemislena.eu',
-      'https://invidious.nerdvpn.de',
-      'https://inv.zzls.xyz'
   ];
   private currentInvInstance = this.invidiousInstances[0];
   private customInvInstance = '';
-  
   private plugins: any[] = [];
-  
-  // Configurable timeout (default 15s)
   private requestTimeout = 15000;
-  
-  // Guest Identity
   private guestCookie = '';
 
   constructor() {
@@ -51,35 +40,26 @@ export class ClientSideService {
     this.generateGuestHeaders();
   }
   
-  setSearchTimeout(ms: number) {
-      this.requestTimeout = ms;
-  }
+  setSearchTimeout(ms: number) { this.requestTimeout = ms; }
   
-  // Generate random Hex string
   private randomHex(length: number) {
       let result = '';
       const characters = '0123456789abcdef';
-      for (let i = 0; i < length; i++) {
-          result += characters.charAt(Math.floor(Math.random() * characters.length));
-      }
+      for (let i = 0; i < length; i++) result += characters.charAt(Math.floor(Math.random() * characters.length));
       return result;
   }
 
   private generateGuestHeaders() {
-      // Mimic NMTID and DeviceId for better guest access rates
       const nmtid = this.randomHex(32);
       const deviceId = this.randomHex(16);
       this.guestCookie = `os=pc; appver=2.9.7; NMTID=${nmtid}; DeviceId=${deviceId};`;
   }
 
-  setCustomInvidiousUrl(url: string) {
-      this.customInvInstance = url ? url.replace(/\/$/, '') : '';
-  }
+  setCustomInvidiousUrl(url: string) { this.customInvInstance = url ? url.replace(/\/$/, '') : ''; }
 
-  // --- 智能 Headers 构造 ---
   private getHeaders() {
       const savedUser = localStorage.getItem('unistream_user');
-      let cookieStr = this.guestCookie; // Default to guest
+      let cookieStr = this.guestCookie; 
 
       if (savedUser) {
           try {
@@ -95,24 +75,18 @@ export class ClientSideService {
               }
           } catch(e) {}
       }
-
-      return {
-          ...this.baseHeaders,
-          'Cookie': cookieStr
-      };
+      return { ...this.baseHeaders, 'Cookie': cookieStr };
   }
 
-  // --- Latency / Ping Test ---
   async getPings(): Promise<{ netease: number; youtube: number }> {
       const start = Date.now();
       let netease = -1;
       let youtube = -1;
-
       try {
           await CapacitorHttp.get({ 
               url: 'https://music.163.com/api/search/hot', 
               headers: this.getHeaders(),
-              connectTimeout: 5000 // Ping should be fast
+              connectTimeout: 5000 
           });
           netease = Date.now() - start;
       } catch (e) { netease = -1; }
@@ -122,50 +96,12 @@ export class ClientSideService {
       try {
            await CapacitorHttp.get({ url: `${targetYt}/api/v1/stats`, connectTimeout: 5000 });
            youtube = Date.now() - ytStart;
-      } catch (e) { 
-           youtube = -1; 
-      }
+      } catch (e) { youtube = -1; }
       return { netease, youtube };
   }
 
-  // --- Plugin Management ---
-  async installPluginFromUrl(url: string): Promise<boolean> {
-      try {
-          const response = await CapacitorHttp.get({ url });
-          if (response.status === 200 && response.data) {
-              return await this.importPlugin(response.data, url);
-          }
-      } catch (e) { console.error(e); }
-      return false;
-  }
-
-  async importPlugin(code: string, srcUrl?: string): Promise<boolean> {
-      try {
-          const createPlugin = new Function('CapacitorHttp', `
-              try {
-                  ${code};
-                  return typeof plugin !== 'undefined' ? plugin : (typeof module !== 'undefined' ? module.exports : {});
-              } catch(e) { return null; }
-          `);
-          const plugin = createPlugin(CapacitorHttp);
-          if (plugin && (plugin.search || plugin.platform)) {
-              const existingIdx = this.plugins.findIndex(p => p.platform === plugin.platform);
-              if (existingIdx !== -1) this.plugins.splice(existingIdx, 1);
-              plugin.id = `plugin-${Date.now()}-${Math.floor(Math.random()*1000)}`;
-              plugin.srcUrl = srcUrl;
-              this.plugins.push(plugin);
-              return true;
-          }
-      } catch (e) { console.error(e); }
-      return false;
-  }
+  // --- Artist & Playlist ---
   
-  getPlugins() { return this.plugins; }
-  removePlugin(id: string) { this.plugins = this.plugins.filter(p => p.id !== id); }
-
-  // --- Artist & Playlist Import Logic ---
-  
-  // Get User Playlists
   async getUserPlaylists(uid: string): Promise<Playlist[]> {
       try {
           const url = `https://music.163.com/api/user/playlist?uid=${uid}&limit=100&offset=0`;
@@ -174,7 +110,6 @@ export class ClientSideService {
               headers: this.getHeaders(),
               connectTimeout: this.requestTimeout
           });
-
           let data = response.data;
           if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e) {} }
 
@@ -183,38 +118,13 @@ export class ClientSideService {
                   id: String(pl.id),
                   name: pl.name,
                   description: pl.description,
-                  songs: [], // Songs are lazy loaded usually, or we can fetch first track
+                  songs: [],
                   coverUrl: pl.coverImgUrl ? pl.coverImgUrl.replace(/^http:/, 'https:') : '',
                   isSystem: false,
                   creatorId: String(pl.creator?.userId)
               }));
           }
-      } catch (e) {
-          console.error("User Playlist Error", e);
-      }
-      return [];
-  }
-
-  // Get Daily Recommend Songs
-  async getDailyRecommendSongs(): Promise<Song[]> {
-      try {
-          // This API usually requires a valid LOGIN cookie
-          const url = `https://music.163.com/api/v3/discovery/recommend/songs`;
-          const response = await CapacitorHttp.post({
-              url: url,
-              headers: this.getHeaders(),
-              connectTimeout: this.requestTimeout
-          });
-
-          let data = response.data;
-          if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e) {} }
-          
-          if (data && data.code === 200 && data.data && data.data.dailySongs) {
-               return data.data.dailySongs.map((item: any) => this.mapNeteaseSong(item));
-          }
-      } catch (e) {
-          console.error("Daily Recommend Error", e);
-      }
+      } catch (e) { console.error("User Playlist Error", e); }
       return [];
   }
 
@@ -226,16 +136,13 @@ export class ClientSideService {
               headers: this.getHeaders(),
               connectTimeout: this.requestTimeout
           });
-
           let data = response.data;
           if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e) {} }
 
           if (data && data.playlist && data.playlist.tracks) {
               return data.playlist.tracks.map((item: any) => this.mapNeteaseSong(item));
           }
-      } catch (e) {
-          console.error("Playlist Import Error", e);
-      }
+      } catch (e) { console.error("Playlist Import Error", e); }
       return [];
   }
 
@@ -247,7 +154,6 @@ export class ClientSideService {
               headers: this.getHeaders(),
               connectTimeout: this.requestTimeout
           });
-
           let data = response.data;
           if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e) {} }
 
@@ -260,13 +166,10 @@ export class ClientSideService {
                   description: artistData.briefDesc,
                   songSize: artistData.musicSize
               };
-
               const songs = (data.songs || []).map((item: any) => this.mapNeteaseSong(item));
               return { artist, songs };
           }
-      } catch (e) {
-          console.error("Artist Detail Error", e);
-      }
+      } catch (e) {}
       return { artist: { id: artistId, name: 'Unknown', coverUrl: '' }, songs: [] };
   }
 
@@ -286,7 +189,6 @@ export class ClientSideService {
             allSongs = [...allSongs, ...res.value];
         }
     });
-
     return allSongs;
   }
 
@@ -306,13 +208,16 @@ export class ClientSideService {
   }
 
   private mapNeteaseSong(item: any): Song {
+      // 🟢 修复：同时赋值 cover (新) 和 coverUrl (旧)
+      const cover = item.al?.picUrl ? item.al.picUrl.replace(/^http:/, 'https:') : (item.album?.picUrl ? item.album.picUrl.replace(/^http:/, 'https:') : '');
       return {
           id: String(item.id),
           title: item.name,
           artist: item.ar ? item.ar.map((a: any) => a.name).join('/') : (item.artists ? item.artists.map((a: any) => a.name).join('/') : 'Unknown'),
           artistId: item.ar ? String(item.ar[0].id) : (item.artists ? String(item.artists[0].id) : undefined),
           album: item.al ? item.al.name : (item.album ? item.album.name : ''),
-          coverUrl: item.al?.picUrl ? item.al.picUrl.replace(/^http:/, 'https:') : (item.album?.picUrl ? item.album.picUrl.replace(/^http:/, 'https:') : ''),
+          cover: cover,
+          coverUrl: cover,
           source: MusicSource.NETEASE,
           duration: Math.floor(item.dt / 1000),
           isGray: false,
@@ -325,50 +230,47 @@ export class ClientSideService {
       try {
           let url = 'https://music.163.com/api/cloudsearch/pc';
           let data = `s=${encodeURIComponent(keyword)}&type=1&offset=0&limit=20&total=true`;
-
           const response = await CapacitorHttp.post({
               url: url,
               headers: this.getHeaders(),
               data: data,
               connectTimeout: this.requestTimeout
           });
-
           let resData = response.data;
           if (typeof resData === 'string') { try { resData = JSON.parse(resData); } catch(e) {} }
-
           if (resData?.result?.songs) {
               return resData.result.songs.map((item: any) => this.mapNeteaseSong(item));
           }
-      } catch (e) { console.error("Netease Search Error", e); }
+      } catch (e) {}
       return [];
   }
 
   private async searchBilibili(keyword: string): Promise<Song[]> {
       try {
-          // Bilibili Web Interface Search
           const url = `https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword=${encodeURIComponent(keyword)}`;
           const response = await CapacitorHttp.get({
               url: url,
               headers: this.bilibiliHeaders,
               connectTimeout: this.requestTimeout
           });
-
           if (response.status === 200 && response.data?.data?.result) {
-              return response.data.data.result.map((item: any) => ({
-                  id: item.bvid,
-                  title: item.title.replace(/<[^>]*>/g, ''), // Remove HTML tags
-                  artist: item.author,
-                  album: 'Bilibili',
-                  coverUrl: item.pic.startsWith('//') ? `https:${item.pic}` : item.pic,
-                  source: MusicSource.BILIBILI,
-                  duration: this.parseBiliDuration(item.duration),
-                  isGray: false,
-                  mvId: item.bvid // Bilibili videos are MVs by definition
-              }));
+              return response.data.data.result.map((item: any) => {
+                  const cover = item.pic.startsWith('//') ? `https:${item.pic}` : item.pic;
+                  return {
+                      id: item.bvid,
+                      title: item.title.replace(/<[^>]*>/g, ''),
+                      artist: item.author,
+                      album: 'Bilibili',
+                      cover: cover,
+                      coverUrl: cover,
+                      source: MusicSource.BILIBILI,
+                      duration: this.parseBiliDuration(item.duration),
+                      isGray: false,
+                      mvId: item.bvid
+                  };
+              });
           }
-      } catch (e) {
-          console.error("Bilibili Search Error", e);
-      }
+      } catch (e) {}
       return [];
   }
 
@@ -380,246 +282,41 @@ export class ClientSideService {
       return 0;
   }
 
-  // Updated: Robust Search with Auto-Rotation
   private async searchYouTube(keyword: string): Promise<Song[]> {
-      const candidates = this.customInvInstance 
-          ? [this.customInvInstance, ...this.invidiousInstances] 
-          : [...this.invidiousInstances];
-
-      // Shuffle candidates lightly to distribute load if not custom
+      const candidates = this.customInvInstance ? [this.customInvInstance, ...this.invidiousInstances] : [...this.invidiousInstances];
       if (!this.customInvInstance) {
           const rand = Math.floor(Math.random() * candidates.length);
-          const temp = candidates[0];
-          candidates[0] = candidates[rand];
-          candidates[rand] = temp;
+          [candidates[0], candidates[rand]] = [candidates[rand], candidates[0]];
       }
 
       for (const instance of candidates) {
           try {
               const url = `${instance}/api/v1/search?q=${encodeURIComponent(keyword)}&type=video`;
-              // Faster timeout for trying multiple instances
-              const response = await CapacitorHttp.get({ 
-                  url, 
-                  connectTimeout: 4000 
-              });
-
+              const response = await CapacitorHttp.get({ url, connectTimeout: 4000 });
               if (response.status === 200 && Array.isArray(response.data)) {
-                  this.currentInvInstance = instance; // Remember the working one
-                  return response.data.slice(0, 5).map((item: any) => ({
-                      id: item.videoId,
-                      title: item.title,
-                      artist: item.author,
-                      album: 'YouTube',
-                      coverUrl: item.videoThumbnails?.[0]?.url || `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`,
-                      source: MusicSource.YOUTUBE,
-                      duration: item.lengthSeconds,
-                      isGray: false,
-                      mvId: item.videoId
-                  }));
+                  this.currentInvInstance = instance;
+                  return response.data.slice(0, 5).map((item: any) => {
+                      const cover = item.videoThumbnails?.[0]?.url || `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`;
+                      return {
+                          id: item.videoId,
+                          title: item.title,
+                          artist: item.author,
+                          album: 'YouTube',
+                          cover: cover,
+                          coverUrl: cover,
+                          source: MusicSource.YOUTUBE,
+                          duration: item.lengthSeconds,
+                          isGray: false,
+                          mvId: item.videoId
+                      };
+                  });
               }
-          } catch (e) {
-              console.warn(`Instance failed: ${instance}`);
-              // Continue to next instance
-          }
+          } catch (e) {}
       }
-      
-      console.error("All YouTube instances failed.");
       return [];
   }
 
-  // --- Audio Details Logic ---
+  // --- Playback Logic ---
   async getSongDetails(song: Song, quality: AudioQuality = 'standard'): Promise<SongPlayDetails> {
       if (song.source === MusicSource.NETEASE) {
-          return this.getNeteaseDetails(song, quality);
-      } else if (song.source === MusicSource.YOUTUBE) {
-          const url = await this.getYouTubeUrl(song.id);
-          return { url };
-      } else if (song.source === MusicSource.BILIBILI) {
-          const url = await this.getBilibiliUrl(song.id);
-          return { url };
-      } else if (song.source === MusicSource.PLUGIN && (song as any).pluginId) {
-          const plugin = this.plugins.find(p => p.id === (song as any).pluginId);
-          if (plugin && plugin.getMediaUrl) {
-              const url = await plugin.getMediaUrl(song);
-              return { url };
-          }
-      } else if (song.source === MusicSource.LOCAL && song.audioUrl) {
-          return { url: song.audioUrl };
-      }
-      return { url: '' };
-  }
-  
-  // ... rest of existing methods (downloadSongBlob, getRealAudioUrl, getMvUrl)
-  async downloadSongBlob(url: string): Promise<Blob | null> {
-    try {
-        const response = await CapacitorHttp.get({
-            url,
-            responseType: 'blob',
-            headers: this.baseHeaders
-        });
-        if (response.status === 200 && response.data) return response.data;
-    } catch (e) { console.error("Download Blob Failed", e); }
-    return null;
-  }
-
-  async getRealAudioUrl(song: Song): Promise<string> {
-      const details = await this.getSongDetails(song);
-      return details.url;
-  }
-
-  async getMvUrl(song: Song): Promise<string | null> {
-      if (song.source === MusicSource.YOUTUBE) {
-           return this.getYouTubeUrl(song.id);
-      } else if (song.source === MusicSource.BILIBILI) {
-           // Reuse the logic, requests MP4
-           return this.getBilibiliUrl(song.id);
-      } else if (song.source === MusicSource.NETEASE && song.mvId) {
-          try {
-              const url = `https://music.163.com/api/mv/detail?id=${song.mvId}&type=mp4`;
-              const response = await CapacitorHttp.get({
-                  url: url,
-                  headers: this.getHeaders(),
-                  connectTimeout: this.requestTimeout
-              });
-              let data = response.data;
-              if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e) {} }
-              if (data && data.data && data.data.brs) {
-                  const brs = data.data.brs;
-                  const keys = Object.keys(brs).sort((a,b) => Number(b) - Number(a));
-                  if (keys.length > 0) return brs[keys[0]];
-              }
-          } catch(e) {}
-      }
-      return null;
-  }
-
-  private async getNeteaseDetails(song: Song, quality: AudioQuality): Promise<SongPlayDetails> {
-       // ... existing implementation
-      let playUrl = '';
-      let lyric = '';
-      try {
-           const id = song.id;
-           let br = 128000;
-           let level = 'standard';
-           if (quality === 'exhigh') { br = 320000; level = 'exhigh'; }
-           if (quality === 'lossless') { br = 999000; level = 'lossless'; }
-
-           const urlApi = `https://music.163.com/api/song/enhance/player/url`;
-           const data = `id=${id}&ids=[${id}]&br=${br}&level=${level}`; 
-           
-           const response = await CapacitorHttp.post({
-               url: urlApi,
-               headers: this.getHeaders(),
-               data: data,
-               connectTimeout: this.requestTimeout
-           });
-           // ... parsing logic
-           let resData = response.data;
-           if (typeof resData === 'string') { try { resData = JSON.parse(resData); } catch(e) {} }
-           const songData = resData?.data?.[0];
-
-           if (response.status === 200 && songData) {
-               if (!songData.url || songData.code !== 200 || songData.freeTrialInfo) {
-                   throw new Error("VIP_REQUIRED");
-               }
-               playUrl = songData.url.replace(/^http:/, 'https:');
-           }
-           
-           const lyricApi = `https://music.163.com/api/song/lyric?id=${id}&lv=1&kv=1&tv=-1`;
-           const lyricRes = await CapacitorHttp.get({
-               url: lyricApi,
-               headers: this.getHeaders()
-           });
-           // ... lyric parsing
-           let lyricData = lyricRes.data;
-           if (typeof lyricData === 'string') { try { lyricData = JSON.parse(lyricData); } catch(e) {} }
-           if (lyricData?.lrc?.lyric) lyric = lyricData.lrc.lyric;
-      } catch (e: any) { 
-          if (e.message === "VIP_REQUIRED") throw e;
-          console.error("Netease Detail Fetch failed", e); 
-      }
-      return { url: playUrl, lyric };
-  }
-
-  private async getYouTubeUrl(id: string): Promise<string> {
-      const targetHost = this.customInvInstance || this.currentInvInstance;
-      // Try twice if first fails
-      try {
-          return `${targetHost}/latest_version?id=${id}&itag=18&local=true`;
-      } catch (e) {
-          this.rotateInstance();
-          const backupHost = this.customInvInstance || this.currentInvInstance;
-          return `${backupHost}/latest_version?id=${id}&itag=18&local=true`;
-      }
-  }
-
-  private async getBilibiliUrl(bvid: string): Promise<string> {
-      try {
-          // 1. Get CID
-          const viewUrl = `https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`;
-          const viewRes = await CapacitorHttp.get({
-              url: viewUrl,
-              headers: this.bilibiliHeaders
-          });
-          
-          let cid = '';
-          if (viewRes.data?.data?.cid) {
-              cid = viewRes.data.data.cid;
-          } else {
-              return '';
-          }
-
-          // 2. Get Play URL (HTML5 platform often returns standard MP4/M4A)
-          // fnval=0 or 1 usually gives mp4/flv mixed. 
-          const playUrl = `https://api.bilibili.com/x/player/playurl?bvid=${bvid}&cid=${cid}&qn=64&fnval=1&platform=html5&high_quality=1`;
-          const playRes = await CapacitorHttp.get({
-              url: playUrl,
-              headers: this.bilibiliHeaders
-          });
-          
-          if (playRes.data?.data?.durl && playRes.data.data.durl.length > 0) {
-              return playRes.data.data.durl[0].url;
-          }
-      } catch(e) {
-          console.error("Bilibili Play URL Error", e);
-      }
-      return '';
-  }
-  
-  // ... rest of login methods
-  async getUserStatus(cookieInput: string): Promise<any> { 
-      try {
-          let finalCookie = cookieInput.trim();
-          const musicUMatch = cookieInput.match(/MUSIC_U=([0-9a-zA-Z]+)/);
-          if (musicUMatch) finalCookie = musicUMatch[1]; 
-          else if (cookieInput.length > 50 && !cookieInput.includes('=')) finalCookie = cookieInput;
-
-          const testHeader = `os=pc; appver=2.9.7; MUSIC_U=${finalCookie};`;
-
-          const response = await CapacitorHttp.post({
-              url: 'https://music.163.com/api/w/nuser/account/get',
-              headers: { ...this.baseHeaders, 'Cookie': testHeader },
-              connectTimeout: 8000
-          });
-          
-          let resData = response.data;
-          if (typeof resData === 'string') { try { resData = JSON.parse(resData); } catch(e) {} }
-          
-          if (resData && resData.code === 200) {
-              resData._cleanedCookie = finalCookie;
-          }
-          return resData;
-      } catch(e) { return { code: 500 }; }
-  }
-
-  async getLoginKey(): Promise<any> { return { code: 500 }; }
-  async createLoginQR(key: string): Promise<any> { return { code: 500 }; }
-  async checkLoginQR(key: string): Promise<any> { return { code: 500 }; }
-  
-  private rotateInstance() {
-      const idx = this.invidiousInstances.indexOf(this.currentInvInstance);
-      this.currentInvInstance = this.invidiousInstances[(idx + 1) % this.invidiousInstances.length];
-  }
-}
-
-export const musicService = new ClientSideService();
+          return this.getN
